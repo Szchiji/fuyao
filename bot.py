@@ -25,7 +25,7 @@ dp.include_router(admin_router)
 
 async def main():
     init_db()
-    print("✅ 狼评机器人重构版已启动（结构清晰）")
+    print("✅ 狼评机器人重构版启动成功")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
