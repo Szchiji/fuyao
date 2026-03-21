@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from states import RatingStates
 from utils.helpers import send_teacher_detail
 from database import add_evaluation, get_encourage
-from bot import bot
+from bot_instance import bot
 
 router = Router()
 
