@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import CHANNEL_LINK
 from database import get_start_message, get_required_channel
-from bot import bot
+from bot_instance import bot
 
 router = Router()
 
@@ -38,6 +38,7 @@ async def cmd_help(message: Message):
 
 👥 用户命令：
 • /start - 启动机器人
+• /help - 获取帮助
 • @teacher_name - 查询教师评价
 
 ⭐ 如何评价：
@@ -47,5 +48,7 @@ async def cmd_help(message: Message):
 
 管理员可以使用：
 • /admin - 进入管理员面板
+• /setchannel - 设置频道
+• /setstart - 设置欢迎语
 """
     await message.reply(help_text)
