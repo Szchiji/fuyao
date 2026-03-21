@@ -28,6 +28,7 @@ async def admin_menu(message: Message):
     
     channel_status = f"✅ {current_channel}" if current_channel else "❌ 未设置"
     
+    # 使用 | 代替 <> 符号，避免 HTML 解析错误
     menu_text = f"""🛠️ 管理员后台
 
 📊 当前统计：
@@ -39,9 +40,9 @@ async def admin_menu(message: Message):
 • 频道状态: {channel_status}
 
 ⚙️ 管理命令：
-• /setchannel <频道ID> - 设置频道要求
+• /setchannel [频道ID] - 设置频道要求
 • /removechannel - 移除频道要求
-• /setstart <欢迎语> - 设置欢迎语
+• /setstart [欢迎语] - 设置欢迎语
 • /stats - 查看详细统计
 • /testchannel - 测试频道连接
 • /dbinfo - 查看数据库信息"""
@@ -112,7 +113,7 @@ async def remove_channel(message: Message):
 @router.message(Command("setstart"))
 @admin_only
 async def set_start_msg(message: Message):
-    """设��欢迎语"""
+    """设置欢迎语"""
     try:
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2:
@@ -140,8 +141,7 @@ async def set_start_msg(message: Message):
 
 说明:
 • 可以包含中文、emoji、换行等
-• 长度至少5个字
-• 支持 HTML 格式 (如需要)""")
+• 长度至少5个字""")
 
 
 @router.message(Command("stats"))
@@ -206,7 +206,7 @@ async def test_channel(message: Message):
 
 🤖 机器人状态：
 • 状态: {bot_status}
-• 是否为管理员: {"✅ 是" if is_admin else "❌ 否"}
+• 是否为管理���: {"✅ 是" if is_admin else "❌ 否"}
 
 ✅ 频道验证功能应该正常工作
 如果仍有问题，请检查:
@@ -329,12 +329,12 @@ async def admin_help(message: Message):
 /dbinfo - 查看数据库信息
 
 🔐 频道管理：
-/setchannel <ID> - 设置频道要求
+/setchannel [ID] - 设置频道要求
 /removechannel - 移除频道要求  
 /testchannel - 测试频道连接
 
 ✏️ 内容管理：
-/setstart <欢迎语> - 设置欢迎语
+/setstart [欢迎语] - 设置欢迎语
 
 ❓ 其他：
 /help_admin - 显示此帮助"""
