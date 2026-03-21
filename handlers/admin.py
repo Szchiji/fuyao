@@ -1,7 +1,7 @@
 # handlers/admin.py
 """
 管理员命令处理模块
-包含: /admin, /setchannel, /setstart, /stats, /testchannel, /removechannel
+包含: /admin, /setchannel, /setstart, /stats, /testchannel, /debugchannel, /removechannel
 """
 
 from aiogram import Router
@@ -16,7 +16,9 @@ from database import (
 )
 from utils.decorators import admin_only
 from bot_instance import bot
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 @router.message(Command("admin"))
@@ -28,7 +30,6 @@ async def admin_menu(message: Message):
     
     channel_status = f"✅ {current_channel}" if current_channel else "❌ 未设置"
     
-    # 使用 | 代替 <> 符号，避免 HTML 解析错误
     menu_text = f"""🛠️ 管理员后台
 
 📊 当前统计：
@@ -45,6 +46,7 @@ async def admin_menu(message: Message):
 • /setstart [欢迎语] - 设置欢迎语
 • /stats - 查看详细统计
 • /testchannel - 测试频道连接
+• /debugchannel - 深度诊断频道
 • /dbinfo - 查看数据库信息"""
     
     await message.reply(menu_text)
@@ -75,6 +77,8 @@ async def set_channel(message: Message):
             return
         
         set_required_channel(channel_id)
+        logger.info(f"管理员 {message.from_user.id} 设置频道为 {channel_id}")
+        
         await message.reply(f"""✅ 频道已设置
 
 频道ID: {channel_id}
@@ -104,7 +108,9 @@ async def remove_channel(message: Message):
         await message.reply("❌ 当前未设置频道要求")
         return
     
-    set_required_channel("")  # 清空频道
+    set_required_channel("")
+    logger.info(f"管理员 {message.from_user.id} 移除了频道要求")
+    
     await message.reply("""✅ 频道要求已移除
 
 现在所有用户都可以使用机器人，无需订阅频道""")
@@ -126,6 +132,8 @@ async def set_start_msg(message: Message):
             return
         
         set_start_message(start_msg)
+        logger.info(f"管理员 {message.from_user.id} 设置欢迎语")
+        
         await message.reply(f"""✅ 欢迎语已更新
 
 新欢迎语:
@@ -177,24 +185,35 @@ async def test_channel(message: Message):
 /setchannel -1001234567890""")
         return
     
+    logger.info(f"管理员 {message.from_user.id} 测试频道 {channel_id}")
+    
     try:
         # 尝试获取频道信息
         channel = await bot.get_chat(channel_id)
         
         # 获取频道成员数
+        member_count = "未知"
         try:
             member_count = await bot.get_chat_member_count(channel_id)
-        except:
-            member_count = "未知"
+        except Exception as count_err:
+            logger.warning(f"获取成员数失败: {count_err}")
         
-        # 尝试检查机器人自己的权限
+        # 检查机器人的权限状态
+        bot_status = "未知"
+        is_admin = False
+        
         try:
             bot_member = await bot.get_chat_member(channel_id, bot.id)
             bot_status = bot_member.status
-            is_admin = bot_member.is_member
-        except:
-            bot_status = "未知"
-            is_admin = False
+            is_admin = bot_member.status == "administrator"
+            
+            logger.info(f"机器人状态: {bot_status}, 是否管理员: {is_admin}")
+        except Exception as member_err:
+            logger.warning(f"获取机器人状态失败: {member_err}")
+            bot_status = f"错误: {str(member_err)}"
+        
+        # 构建状态文本
+        status_emoji = "✅" if is_admin else "❌"
         
         status_text = f"""✅ 频道已连接
 
@@ -206,65 +225,167 @@ async def test_channel(message: Message):
 
 🤖 机器人状态：
 • 状态: {bot_status}
-• 是否为管理���: {"✅ 是" if is_admin else "❌ 否"}
+• 是否为管理员: {status_emoji} {'是' if is_admin else '否'}
 
-✅ 频道验证功能应该正常工作
-如果仍有问题，请检查:
-1. 机器人是否在频道管理员列表中
-2. 机器人是否有访问成员信息的权限"""
+"""
+        
+        if is_admin:
+            status_text += f"""✅ 频道验证功能应该正常工作
+
+频道要求已生效，用户必须订阅此频道才能使用机器人"""
+        else:
+            status_text += """❌ 机器人不是管理员
+
+解决方案:
+1. 进入频道设置
+2. 找到管理员列表
+3. 确保 @tan1tan_bot 在列表中
+4. 赋予以下权限:
+   • 删除消息
+   • 限制成员
+   • 邀请用户
+   • 更改群组信息
+5. 保存并重新测试"""
         
         await message.reply(status_text)
     
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"频道测试失败: {error_msg}")
         
-        if "chat not found" in error_msg.lower():
-            await message.reply(f"""❌ 频道未找到
+        await message.reply(f"""❌ 测试失败
 
 频道ID: {channel_id}
+错误类型: {type(e).__name__}
+错误信息: {error_msg}
+
+排查步骤:
+1. 确认机器人在频道的管理员列表中
+2. 确认频道ID正确: {channel_id}
+3. 确认频道仍然存在
+4. 尝试移除机器人管理员后重新添加
+5. 稍后再试
+
+如果问题仍未解决，请检查:
+• 机器人是否被限制
+• 频道是否禁用了机器人功能
+• 是否需要重启机器人""")
+
+
+@router.message(Command("debugchannel"))
+@admin_only
+async def debug_channel(message: Message):
+    """调试频道 - 显示详细信息"""
+    channel_id = get_required_channel()
+    
+    if not channel_id:
+        await message.reply("❌ 未设置频道")
+        return
+    
+    logger.info(f"管理员 {message.from_user.id} 请求频道调试")
+    
+    debug_info = f"""🔧 频道调试信息
+
+频道ID: {channel_id}
+
+正在检查...
+"""
+    
+    msg = await message.reply(debug_info)
+    
+    try:
+        checks = []
+        
+        # 1. 检查频道是否存在
+        try:
+            channel = await bot.get_chat(channel_id)
+            checks.append(f"✅ 频道存在: {channel.title}")
+            channel_valid = True
+        except Exception as e:
+            checks.append(f"❌ 频道不存在或无法访问: {str(e)}")
+            channel_valid = False
+        
+        # 2. 检查机器人是否在频道中
+        try:
+            member = await bot.get_chat_member(channel_id, bot.id)
+            checks.append(f"✅ 机器人在频道中: 状态={member.status}")
+        except Exception as e:
+            checks.append(f"❌ 机器人不在频道中: {str(e)}")
+        
+        # 3. 检查成员数
+        try:
+            count = await bot.get_chat_member_count(channel_id)
+            checks.append(f"✅ 成员数: {count}")
+        except Exception as e:
+            checks.append(f"❌ 无法获取成员数: {str(e)}")
+        
+        # 4. 检查频道类型
+        if channel_valid:
+            checks.append(f"✅ 频道类型: {channel.type}")
+        
+        # 5. 检查机器人权限
+        try:
+            bot_member = await bot.get_chat_member(channel_id, bot.id)
+            is_admin = bot_member.status == "administrator"
+            checks.append(f"{'✅' if is_admin else '❌'} 机器人是管理员: {is_admin}")
+            
+            # 显示机器人的具体权限
+            permissions = []
+            if hasattr(bot_member, 'can_delete_messages'):
+                permissions.append(f"删除消息: {bot_member.can_delete_messages}")
+            if hasattr(bot_member, 'can_restrict_members'):
+                permissions.append(f"限制成员: {bot_member.can_restrict_members}")
+            if hasattr(bot_member, 'can_invite_users'):
+                permissions.append(f"邀请用户: {bot_member.can_invite_users}")
+            if hasattr(bot_member, 'can_change_info'):
+                permissions.append(f"修改信息: {bot_member.can_change_info}")
+            if hasattr(bot_member, 'can_post_messages'):
+                permissions.append(f"发布消息: {bot_member.can_post_messages}")
+            
+            if permissions:
+                checks.append("  权限详情:")
+                for perm in permissions:
+                    checks.append(f"    • {perm}")
+        except Exception as e:
+            checks.append(f"❌ 无法检查权限: {str(e)}")
+        
+        # 6. 检查数据库设置
+        checks.append("\n📊 数据库设置:")
+        checks.append(f"  频道ID: {channel_id}")
+        
+        debug_text = f"""🔧 频道调试报告
+
+{chr(10).join(checks)}
+
+💡 诊断完成
+"""
+        
+        logger.info(f"频道诊断完成: {channel_id}")
+        await bot.edit_message_text(debug_text, message.chat.id, msg.message_id)
+    
+    except Exception as e:
+        logger.error(f"频道调试失败: {str(e)}")
+        
+        error_text = f"""❌ 调试失败
+
+错误类型: {type(e).__name__}
+错误信息: {str(e)}
 
 可能的原因:
-1. 频道ID错误
-2. 频道已被删除
-3. 机器人未被邀请到频道
-
-解决方案:
-1. 确认频道ID: /setchannel -1001811864163
-2. 确认机器人在频道中
-3. 赋予机器人管理员权限""")
+1. 频道ID错误或格式不正确
+2. 频道已删除
+3. 网络连接问题
+4. 机器人无法访问该频道"""
         
-        elif "not enough rights" in error_msg.lower() or "forbidden" in error_msg.lower():
-            await message.reply(f"""❌ 机器人权限不足
-
-频道ID: {channel_id}
-
-机器人需要以下权限:
-• 删除消息
-• 限制成员
-• 邀请用户
-• 更改群组信息
-
-解决方案:
-1. 进入频道设置 → 管理员
-2. 选择 @tan1tan_bot
-3. 赋予上述权限""")
-        
-        else:
-            await message.reply(f"""❌ 测试失败
-
-频道ID: {channel_id}
-错误: {error_msg}
-
-请检查:
-1. 机器人是否是频道管理员
-2. 频道ID是否正确
-3. 频道是否存在""")
+        await bot.edit_message_text(error_text, message.chat.id, msg.message_id)
 
 
 @router.message(Command("dbinfo"))
 @admin_only
 async def show_db_info(message: Message):
     """显示数据库信息"""
+    logger.info(f"管理员 {message.from_user.id} 查看数据库信息")
+    
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -297,7 +418,7 @@ async def show_db_info(message: Message):
         latest_text = ""
         if latest:
             teacher, recommend, reason, time = latest
-            latest_text = f"\n\n📝 最后一条评价:\n教师: {teacher}\n态度: {'👍 推荐' if recommend else '👎 不推荐'}\n理由: {reason[:50]}...\n时间: {time}"
+            latest_text = f"\n\n📝 最后一条评价:\n• 教师: {teacher}\n• 态度: {'👍 推荐' if recommend else '👎 不推荐'}\n• 理由: {reason[:50]}...\n• 时间: {time}"
         
         db_info = f"""📊 数据库信息
 
@@ -308,12 +429,12 @@ async def show_db_info(message: Message):
 • 不推荐数: {not_recommend_count}
 
 💾 数据库状态: ✅ 正常
-数据库位置: /data/wolf_recs.db
-{latest_text}"""
+数据库位置: /data/wolf_recs.db{latest_text}"""
         
         await message.reply(db_info)
     
     except Exception as e:
+        logger.error(f"获取数据库信息失败: {str(e)}")
         await message.reply(f"❌ 获取数据库信息失败: {str(e)}")
 
 
@@ -332,11 +453,44 @@ async def admin_help(message: Message):
 /setchannel [ID] - 设置频道要求
 /removechannel - 移除频道要求  
 /testchannel - 测试频道连接
+/debugchannel - 深度诊断频道
 
 ✏️ 内容管理：
 /setstart [欢迎语] - 设置欢迎语
 
 ❓ 其他：
-/help_admin - 显示此帮助"""
+/help_admin - 显示此帮助
+
+💡 使用示例:
+
+1. 设置频道:
+   /setchannel -1001811864163
+
+2. 测试频道:
+   /testchannel
+
+3. 如果显示未知，使用深度诊断:
+   /debugchannel
+
+4. 设置欢迎语:
+   /setstart 欢迎使用狼评机器人！"""
     
     await message.reply(help_text)
+
+
+@router.message(Command("getid"))
+async def get_my_id(message: Message):
+    """获取用户ID - 任何人都可以使用"""
+    user_id = message.from_user.id
+    username = message.from_user.username or "无"
+    
+    await message.reply(f"""📋 您的 Telegram 信息
+
+用户ID: <code>{user_id}</code>
+用户名: @{username}
+
+💡 如何成为管理员:
+在 Railway Variables 中设置:
+ADMIN_IDS={user_id}
+
+然后重新部署机器人""")
