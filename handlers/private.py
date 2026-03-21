@@ -1,8 +1,9 @@
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from config import CHANNEL_LINK
 from database import get_start_message, get_required_channel
-from states import RatingStates
+from bot import bot
 
 router = Router()
 
@@ -19,8 +20,6 @@ async def cmd_start(message: Message):
                 kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="加入频道", url=CHANNEL_LINK)]])
                 await message.reply("⚠️ 请先加入频道", reply_markup=kb)
                 return
-            else:
-                await message.reply("✅ 关注成功！欢迎使用狼评机器人～")
         except:
             pass
 
