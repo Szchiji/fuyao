@@ -1,9 +1,10 @@
 from aiogram import Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from states import RatingStates
 from utils.helpers import send_teacher_detail
 from database import add_evaluation, get_encourage
+from bot import bot
 
 router = Router()
 
@@ -16,5 +17,30 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
         await state.update_data(teacher=teacher, recommend=recommend, msg_id=callback.message.message_id, chat_id=callback.message.chat.id)
         await state.set_state(RatingStates.waiting_reason)
 
-        await bot.send_message(callback.from_user.id, f"您选择了 {'👍推荐' if recommend else '👎不推荐'} 「@{teacher}」\n\n请回复这条消息填写理由（至少12字）：")
-        await callback.answer("请私聊填写")
+        await bot.send_message(callback.from_user.id, f"您选择了 {'👍推荐' if recommend else '👎不推荐'} 「@{teacher}」\n\n请在私聊中填写理由（至少12字）：")
+        await callback.answer("请查看私聊消息")
+        return
+
+    if callback.data.startswith("view_yes|"):
+        teacher = callback.data.split("|", 1)[1]
+        await send_teacher_detail(callback.message, teacher, edit_msg_id=callback.message.message_id)
+        await callback.answer()
+
+@router.message(RatingStates.waiting_reason)
+async def process_reason(message: Message, state: FSMContext):
+    data = await state.get_data()
+    teacher = data.get("teacher")
+    recommend = data.get("recommend")
+    user_id = message.from_user.id
+
+    if len(message.text.strip()) < 12:
+        await message.reply("❌ 理由至少需要12个字，请重新填写")
+        return
+
+    result = add_evaluation(teacher, recommend, message.text, user_id)
+    if result["success"]:
+        await message.reply(get_encourage())
+    else:
+        await message.reply(result["msg"])
+
+    await state.clear()
