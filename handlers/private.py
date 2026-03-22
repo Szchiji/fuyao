@@ -13,10 +13,12 @@ from aiogram.fsm.context import FSMContext
 from database import (
     get_start_message,
     get_all_required_channels,
-    get_teacher_stats
+    get_teacher_stats,
+    get_leaderboard
 )
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
+from utils.helpers import format_leaderboard_text
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -120,6 +122,7 @@ async def cmd_start(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📖 查看帮助", callback_data="show_help")],
         [InlineKeyboardButton(text="⭐ 如何评价", callback_data="how_to_rate")],
+        [InlineKeyboardButton(text="🏆 教师排行榜", callback_data="show_leaderboard")],
         [InlineKeyboardButton(text="❓ 常见问题", callback_data="faq")]
     ])
     
@@ -215,6 +218,18 @@ A: 管理员有权删除违规评价。
 • 在群组中使用 @teacher_name 测试"""
     
     await message.reply(help_text)
+
+
+@router.message(Command("leaderboard", "排行榜"))
+async def cmd_leaderboard(message: Message):
+    """处理 /leaderboard 或 /排行榜 命令"""
+    leaderboard = get_leaderboard(10)
+    text = format_leaderboard_text(leaderboard)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+    ])
+    await message.reply(text, reply_markup=kb)
 
 
 @router.message(Command("myid", "我的ID"))

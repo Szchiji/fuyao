@@ -594,6 +594,72 @@ def get_teacher_all_ratings(teacher: str) -> list:
         return []
 
 
+def get_leaderboard(limit: int = 10) -> list:
+    """
+    获取教师排行榜（按推荐数降序，推荐数相同则按总评价数降序）
+
+    Args:
+        limit: 返回的教师数量，默认 10
+
+    Returns:
+        列表，每项为 dict: teacher, total, recommend, not_recommend, recommend_pct
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        if USE_POSTGRES:
+            cursor.execute(
+                """
+                SELECT teacher,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN recommend = 1 THEN 1 ELSE 0 END) AS recommend_count,
+                       SUM(CASE WHEN recommend = 0 THEN 1 ELSE 0 END) AS not_recommend_count
+                FROM recs
+                GROUP BY teacher
+                ORDER BY recommend_count DESC, total DESC
+                LIMIT %s
+                """,
+                (limit,)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT teacher,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN recommend = 1 THEN 1 ELSE 0 END) AS recommend_count,
+                       SUM(CASE WHEN recommend = 0 THEN 1 ELSE 0 END) AS not_recommend_count
+                FROM recs
+                GROUP BY teacher
+                ORDER BY recommend_count DESC, total DESC
+                LIMIT ?
+                """,
+                (limit,)
+            )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        result = []
+        for row in rows:
+            total = row[1]
+            recommend = row[2]
+            not_recommend = row[3]
+            pct = int(recommend / total * 100) if total > 0 else 0
+            result.append({
+                "teacher": row[0],
+                "total": total,
+                "recommend": recommend,
+                "not_recommend": not_recommend,
+                "recommend_pct": pct,
+            })
+        return result
+
+    except Exception as e:
+        logger.error(f"获取排行榜失败: {e}")
+        return []
+
+
 def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
     """删除指定 ID 的评价"""
     try:
