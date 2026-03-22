@@ -1,12 +1,15 @@
 # bot.py
 """
-狼评机器人主程序
+狼评机器人主程序 - 混合模式
+同时支持 Webhook（主要）和轮询（备份）
 """
 
 import asyncio
 import logging
-import sys
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher
+from aiogram.types import Update
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
@@ -19,49 +22,116 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-logger.info("🚀 启动狼评机器人...")
+logger.info("🚀 启动狼评机器人（混合模式）...")
 logger.info(f"📝 配置的管理员 ID: {ADMIN_IDS}")
 
+# 导入路由器
 try:
     from handlers.admin import router as admin_router
     logger.info("✅ admin_router 已加载")
 except Exception as e:
     logger.error(f"❌ 加载 admin_router 失败: {e}")
-    sys.exit(1)
+    exit(1)
 
 try:
     from handlers.rating import router as rating_router
     logger.info("✅ rating_router 已加载")
 except Exception as e:
     logger.error(f"❌ 加载 rating_router 失败: {e}")
-    sys.exit(1)
+    exit(1)
 
 try:
     from handlers.callback import router as callback_router
     logger.info("✅ callback_router 已加载")
 except Exception as e:
-    logger.error(f"❌ 加载 callback_router 失败: {e}")
-    sys.exit(1)
+    logger.error(f"❌ ��载 callback_router 失败: {e}")
+    exit(1)
 
 try:
     from handlers.private import router as private_router
     logger.info("✅ private_router 已加载")
 except Exception as e:
     logger.error(f"❌ 加载 private_router 失败: {e}")
-    sys.exit(1)
+    exit(1)
 
 try:
     init_db()
     logger.info("✅ 数据库初始化完成")
 except Exception as e:
     logger.error(f"❌ 数据库初始化失败: {e}")
-    sys.exit(1)
+    exit(1)
+
+
+# 全局变量
+bot = None
+dp = None
+webhook_mode = False
+polling_mode = False
+
+
+async def setup_dispatcher():
+    """设置 Dispatcher"""
+    global dp
+    
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+    
+    logger.info("📋 注册路由器...")
+    
+    dp.include_router(admin_router)
+    logger.info("✅ admin_router 已注册")
+    
+    dp.include_router(rating_router)
+    logger.info("✅ rating_router 已注册")
+    
+    dp.include_router(callback_router)
+    logger.info("✅ callback_router 已注册")
+    
+    dp.include_router(private_router)
+    logger.info("✅ private_router 已注册")
+
+
+async def webhook_handler(request: web.Request) -> web.Response:
+    """
+    处理来自 Telegram 的 Webhook 请求
+    Telegram 服务器直接推送更新到这个端点
+    """
+    try:
+        update_data = await request.json()
+        update = Update(**update_data)
+        
+        # 处理更新
+        await dp.feed_update(bot, update)
+        
+        return web.Response(text="ok", status=200)
+    except Exception as e:
+        logger.error(f"❌ Webhook 处理错误: {e}", exc_info=True)
+        return web.Response(status=500, text="error")
+
+
+async def polling_task():
+    """
+    轮询任务（备份）
+    如果 Webhook 失败，轮询会接管
+    """
+    logger.info("🔄 轮询备份已启动（轮询作为备份，不是主要方式）")
+    
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            poll_interval=1.0,
+            timeout=10
+        )
+    except asyncio.CancelledError:
+        logger.info("⛔ 轮询备份已停止")
+    except Exception as e:
+        logger.error(f"❌ 轮询备份错误: {e}", exc_info=True)
 
 
 async def main():
-    """主函数"""
-    # 创建存储
-    storage = MemoryStorage()
+    """主函数 - 混合模式"""
+    global bot, webhook_mode, polling_mode
     
     # 创建 Bot 实例
     bot = Bot(
@@ -69,40 +139,152 @@ async def main():
         default=DefaultBotProperties(parse_mode="HTML")
     )
     
-    # 创建 Dispatcher
-    dp = Dispatcher(storage=storage)
+    # 设置 Dispatcher
+    await setup_dispatcher()
     
-    # ⭐ 重要：注册路由器的顺序很重要！
-    # 管理员路由器要放在前面，因为它的命令更具体
-    logger.info("📋 注册路由器...")
+    # 获取环境变量
+    PORT = int(os.getenv('PORT', 8080))
+    NODE_ENV = os.getenv('NODE_ENV', 'development')
+    RAILWAY_PUBLIC_URL = os.getenv('RAILWAY_PUBLIC_URL', '')
     
-    # 1. 先注册管理员路由器（具体命令）
-    dp.include_router(admin_router)
-    logger.info("✅ admin_router 已注册")
+    # 判断运行环境
+    is_production = NODE_ENV == 'production' and RAILWAY_PUBLIC_URL
     
-    # 2. 再注册评价路由器（状态机）
-    dp.include_router(rating_router)
-    logger.info("✅ rating_router 已注册")
+    logger.info(f"🌍 运行环境: {NODE_ENV}")
+    logger.info(f"🔗 Railway Public URL: {RAILWAY_PUBLIC_URL if RAILWAY_PUBLIC_URL else '无（本地开发）'}")
     
-    # 3. 再注册回调路由器
-    dp.include_router(callback_router)
-    logger.info("✅ callback_router 已注册")
+    # ==================== 创建 Web 应用 ====================
+    app = web.Application()
     
-    # 4. 最后注册私聊路由器（通用消息处理）
-    dp.include_router(private_router)
-    logger.info("✅ private_router 已注册")
+    # 添加 Webhook 路由
+    app.router.post('/webhook', webhook_handler)
     
-    logger.info("✅ 狼评机器人已启动")
-    logger.info("🔄 开始轮询更新...")
+    # 添加健康检查路由
+    async def health_check(request):
+        """健康检查端点"""
+        return web.Response(
+            text='{"status": "ok", "mode": "hybrid"}',
+            content_type='application/json'
+        )
     
+    app.router.get('/health', health_check)
+    
+    # 添加信息端点
+    async def info_handler(request):
+        """获取机器人信息"""
+        info = {
+            "status": "running",
+            "mode": "hybrid",
+            "webhook_enabled": webhook_mode,
+            "polling_enabled": polling_mode,
+            "bot_id": bot.id if bot else None,
+            "environment": NODE_ENV
+        }
+        return web.json_response(info)
+    
+    app.router.get('/info', info_handler)
+    
+    # ==================== 启动 Web 服务器 ====================
+    logger.info(f"🌐 启动 Web 服务器（监听 0.0.0.0:{PORT}）...")
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    
+    logger.info(f"✅ Web 服务器运行在 0.0.0.0:{PORT}")
+    
+    # ==================== 设置 Webhook ====================
+    if is_production and RAILWAY_PUBLIC_URL:
+        logger.info("🚀 生产环境检测到 - 启用 Webhook 模式")
+        webhook_mode = True
+        
+        webhook_url = f"{RAILWAY_PUBLIC_URL}/webhook"
+        logger.info(f"🔗 设置 Webhook URL: {webhook_url}")
+        
+        try:
+            # 移除之前的 Webhook
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ 清除旧 Webhook")
+            
+            # 设置新 Webhook
+            await bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=dp.resolve_used_update_types(),
+                drop_pending_updates=False
+            )
+            logger.info("✅ Webhook 已设置成功")
+            
+            # 获取 Webhook 信息
+            webhook_info = await bot.get_webhook_info()
+            logger.info(f"📊 Webhook 信息: {webhook_info}")
+            
+        except Exception as e:
+            logger.error(f"❌ 设置 Webhook 失败: {e}")
+            logger.warning("⚠️ 将回退到轮询模式")
+            webhook_mode = False
+    else:
+        logger.info("💻 开发环境或本地运行 - 禁用 Webhook")
+        webhook_mode = False
+        
+        try:
+            # 删除 Webhook 以启用轮询
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ 清除 Webhook，启用轮询模式")
+        except Exception as e:
+            logger.warning(f"⚠️ 清除 Webhook 失败: {e}")
+    
+    # ==================== 启动轮询备份 ====================
+    logger.info("🔄 启动轮询备份任务...")
+    polling_mode = True
+    
+    polling_task_obj = asyncio.create_task(polling_task())
+    
+    # ==================== 显示启动信息 ====================
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info("🎉 狼评机器人已启动（混合模式）")
+    logger.info("=" * 50)
+    logger.info(f"📊 工作模式:")
+    logger.info(f"  • Webhook:  {'✅ 已启用' if webhook_mode else '❌ 已禁用'}")
+    logger.info(f"  • 轮询备份: {'✅ 已启用' if polling_mode else '❌ 已禁用'}")
+    logger.info(f"🌐 服务地址: http://0.0.0.0:{PORT}")
+    logger.info(f"🔗 健康检查: http://localhost:{PORT}/health")
+    logger.info(f"📋 机器人信息: http://localhost:{PORT}/info")
+    logger.info("=" * 50)
+    logger.info("")
+    
+    # 保持运行
     try:
-        # 启动轮询
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await asyncio.sleep(float('inf'))
     except KeyboardInterrupt:
-        logger.info("⛔ 机器人已停止")
+        logger.info("⛔ 收到停止信号...")
+    except Exception as e:
+        logger.error(f"❌ 运行错误: {e}")
     finally:
+        logger.info("🛑 关闭机器人...")
+        
+        # 取消轮询任务
+        polling_task_obj.cancel()
+        try:
+            await polling_task_obj
+        except asyncio.CancelledError:
+            pass
+        
+        # 关闭 Bot 连接
         await bot.session.close()
+        
+        # 关闭 Web 服务器
+        await runner.cleanup()
+        
+        logger.info("✅ 机器人已关闭")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("⛔ 机器人停止")
+    except Exception as e:
+        logger.error(f"❌ 致命错误: {e}", exc_info=True)
+        exit(1)
