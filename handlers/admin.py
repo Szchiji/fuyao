@@ -4,6 +4,7 @@
 包含: /admin, /setchannel, /setstart, /stats, /testchannel, /debugchannel, /removechannel
 """
 
+import logging
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -16,15 +17,19 @@ from database import (
 )
 from utils.decorators import admin_only
 from bot_instance import bot
-import logging
+from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+logger.info(f"📝 admin_router 已创建，ADMIN_IDS: {ADMIN_IDS}")
 
 @router.message(Command("admin"))
 @admin_only
 async def admin_menu(message: Message):
     """管理员菜单 - 显示后台面板"""
+    logger.info(f"✅ 用户 {message.from_user.id} 执行 /admin 命令")
+    
     stats = get_global_stats()
     current_channel = get_required_channel()
     
@@ -77,7 +82,7 @@ async def set_channel(message: Message):
             return
         
         set_required_channel(channel_id)
-        logger.info(f"管理员 {message.from_user.id} 设置频道为 {channel_id}")
+        logger.info(f"✅ 管理员 {message.from_user.id} 设置频道为 {channel_id}")
         
         await message.reply(f"""✅ 频道已设置
 
@@ -87,7 +92,7 @@ async def set_channel(message: Message):
 要验证设置，请使用: /testchannel""")
     
     except (IndexError, ValueError):
-        await message.reply("""❌ 用法错误
+        await message.reply("""��� 用法错误
 
 正确用法:
 /setchannel -1001234567890
@@ -109,7 +114,7 @@ async def remove_channel(message: Message):
         return
     
     set_required_channel("")
-    logger.info(f"管理员 {message.from_user.id} 移除了频道要求")
+    logger.info(f"✅ 管理员 {message.from_user.id} 移除了频道要求")
     
     await message.reply("""✅ 频道要求已移除
 
@@ -132,7 +137,7 @@ async def set_start_msg(message: Message):
             return
         
         set_start_message(start_msg)
-        logger.info(f"管理员 {message.from_user.id} 设置欢迎语")
+        logger.info(f"✅ 管理员 {message.from_user.id} 设置欢迎语")
         
         await message.reply(f"""✅ 欢迎语已更新
 
@@ -185,7 +190,7 @@ async def test_channel(message: Message):
 /setchannel -1001234567890""")
         return
     
-    logger.info(f"管理员 {message.from_user.id} 测试频道 {channel_id}")
+    logger.info(f"✅ 管理员 {message.from_user.id} 测试频道 {channel_id}")
     
     try:
         # 尝试获取频道信息
@@ -264,12 +269,7 @@ async def test_channel(message: Message):
 2. 确认频道ID正确: {channel_id}
 3. 确认频道仍然存在
 4. 尝试移除机器人管理员后重新添加
-5. 稍后再试
-
-如果问题仍未解决，请检查:
-• 机器人是否被限制
-• 频道是否禁用了机器人功能
-• 是否需要重启机器人""")
+5. 稍后再试""")
 
 
 @router.message(Command("debugchannel"))
@@ -282,14 +282,13 @@ async def debug_channel(message: Message):
         await message.reply("❌ 未设置频道")
         return
     
-    logger.info(f"管理员 {message.from_user.id} 请求频道调试")
+    logger.info(f"✅ 管理员 {message.from_user.id} 请求频道调试")
     
     debug_info = f"""🔧 频道调试信息
 
 频道ID: {channel_id}
 
-正在检查...
-"""
+正在检查..."""
     
     msg = await message.reply(debug_info)
     
@@ -384,7 +383,7 @@ async def debug_channel(message: Message):
 @admin_only
 async def show_db_info(message: Message):
     """显示数据库信息"""
-    logger.info(f"管理员 {message.from_user.id} 查看数据库信息")
+    logger.info(f"✅ 管理员 {message.from_user.id} 查看数据库信息")
     
     try:
         conn = get_connection()
@@ -429,7 +428,7 @@ async def show_db_info(message: Message):
 • 不推荐数: {not_recommend_count}
 
 💾 数据库状态: ✅ 正常
-数据库位置: /data/wolf_recs.db{latest_text}"""
+数据库类型: PostgreSQL{latest_text}"""
         
         await message.reply(db_info)
     
@@ -459,7 +458,7 @@ async def admin_help(message: Message):
 /setstart [欢迎语] - 设置欢迎语
 
 ❓ 其他：
-/help_admin - 显示此帮助
+/help_admin - 显示此帮��
 
 💡 使用示例:
 
@@ -476,21 +475,3 @@ async def admin_help(message: Message):
    /setstart 欢迎使用狼评机器人！"""
     
     await message.reply(help_text)
-
-
-@router.message(Command("getid"))
-async def get_my_id(message: Message):
-    """获取用户ID - 任何人都可以使用"""
-    user_id = message.from_user.id
-    username = message.from_user.username or "无"
-    
-    await message.reply(f"""📋 您的 Telegram 信息
-
-用户ID: <code>{user_id}</code>
-用户名: @{username}
-
-💡 如何成为管理员:
-在 Railway Variables 中设置:
-ADMIN_IDS={user_id}
-
-然后重新部署机器人""")
