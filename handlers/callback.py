@@ -1,52 +1,56 @@
 # handlers/callback.py
 """
 回调查询处理模块
-处理按钮点击事件
+处理所有按钮点击事件
 """
 
 import logging
 from aiogram import Router
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-from database import get_required_channel, check_user_rated_teacher
+from database import (
+    check_user_rated_teacher,
+    get_all_required_channels
+)
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
 
 logger = logging.getLogger(__name__)
-
-# ⭐ 这一行很重要！
 router = Router()
+
 
 @router.callback_query()
 async def handle_callback(callback: CallbackQuery, state: FSMContext):
     """处理所有回调查询"""
     try:
         data = callback.data
+        logger.info(f"📌 处理回调: {data}")
         
-        # 处理推荐/不推荐
+        # ==================== 评价按钮 ====================
         if data.startswith("rec|"):
-            parts = data.split("|")
+            parts = data.split("|", 2)
             if len(parts) < 3:
-                await callback.answer("❌ 数据错误")
+                await callback.answer("❌ 数据错误", show_alert=True)
                 return
             
-            rec_str = parts[1]
-            teacher = "|".join(parts[2:])  # 教师名称可能包含 |
-            
             try:
-                recommend = int(rec_str)
-            except ValueError:
-                await callback.answer("❌ 数据错误")
+                recommend = int(parts[1])
+                teacher = parts[2]
+            except (ValueError, IndexError):
+                await callback.answer("❌ 数据错误", show_alert=True)
                 return
             
             user_id = callback.from_user.id
             
-            # 检查是否已评价
             if check_user_rated_teacher(teacher, user_id):
-                await callback.answer("❌ 您已经评价过这位教师了", show_alert=True)
+                await callback.answer(
+                    f"❌ 您已经评价过 @{teacher} 了",
+                    show_alert=True
+                )
                 return
             
-            # 保存状态
+            logger.info(f"✅ 用户 {user_id} 选择了 {'推荐' if recommend else '不推荐'} @{teacher}")
+            
             await state.update_data(
                 teacher=teacher,
                 recommend=recommend,
@@ -54,18 +58,29 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
             )
             await state.set_state(RatingStates.waiting_reason)
             
-            # 发送提示
             await callback.answer()
+            
+            emoji = "👍" if recommend else "👎"
             await bot.send_message(
-                callback.from_user.id,
-                f"您选择了 {'👍 推荐' if recommend else '👎 不推荐'} @{teacher}\n\n"
-                f"请在下方填写您的评价理由（至少 12 字）："
+                user_id,
+                f"""📝 您选择了 {emoji} {'推荐' if recommend else '不推荐'} @{teacher}
+
+请在下方填写您的评价理由（至少 12 字）：
+
+💡 评价示例：
+"讲课很生动，逻辑清晰，认真负责，强烈推荐"
+"教学速度较快，不太照顾基础差的同学"
+"""
             )
             return
         
-        # 处理帮助按钮
+        # ==================== 快捷按钮 ====================
+        
         if data == "show_help":
-            help_text = """📖 快速帮助
+            await callback.answer()
+            await bot.send_message(
+                callback.from_user.id,
+                """📖 快速帮助
 
 ⭐ 使用步骤：
 1️⃣ 输入 @teacher_name
@@ -76,55 +91,14 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 📝 评价示例：
 "讲课很生动，逻辑清晰，认真负责，强烈推荐"
 
-💡 获取完整帮助:
-/help"""
-            await callback.answer()
-            await bot.send_message(callback.from_user.id, help_text)
+💡 更多帮助:
+/帮助"""
+            )
             return
-
-        # 处理频道介绍
-        if data == "channel_info":
-            channel_id = get_required_channel()
-            
-            info_text = """📢 频道介绍
-
-这是一个教师评价平台，帮助同学们：
-✅ 了解教师的教学风格
-✅ 参考其他同学的评价
-✅ 做出选课决定
-✅ 互相分享学习体验
-
-🎯 频道内容：
-• 热门教师排行榜
-• 评价统计分析
-• 用户反馈和建议
-
-🔗 加入频道获得：
-• 实时评价更新
-• 教师排行榜
-• 社区讨论"""
-            
-            # 自动获取频道链接
-            channel_link = await get_channel_invite_link(channel_id) if channel_id else ""
-            
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="📢 立即加入频道",
-                    url=channel_link if channel_link else "https://t.me"
-                )],
-                [InlineKeyboardButton(
-                    text="🔙 返回",
-                    callback_data="back_to_start"
-                )]
-            ])
-            
-            await callback.answer()
-            await bot.send_message(callback.from_user.id, info_text, reply_markup=kb)
-            return
-
-        # 处理如何评价
+        
         if data == "how_to_rate":
-            rate_text = """⭐ 如何评价教师
+            await callback.answer()
+            await bot.send_message(callback.from_user.id, """⭐ 如何评价教师
 
 步骤 1️⃣：输入教师名称
 在群组中输入: @李老师
@@ -133,7 +107,7 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 机器人显示该教师的：
 • 推荐人数: 👍 5
 • 不推荐人数: 👎 2
-• 历史评价记录
+• 最新评价
 
 步骤 3️⃣：选择态度
 • 👍 推荐
@@ -143,105 +117,134 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 在私聊中输入评价理由
 至少 12 个字
 
-评价示例：
-✅ "讲课清楚，课件详细，认真解答问题，非常推荐"
-✅ "教学速度较快，基础差的同学跟不上"
-
 步骤 5️⃣：提交
-评价成功后机器人会显示确认信息
+评价成功后机器人会显示确认
 
 💡 小贴士：
 • 一个教师只能评价一次
 • 评价要真实客观
-• 具体说明优缺点
-• 尊重教师和同学"""
-            
-            await callback.answer()
-            await bot.send_message(callback.from_user.id, rate_text)
+• 具体说明优缺点""")
             return
-
-        # 处理常见问题
+        
         if data == "faq":
-            faq_text = """❓ 常见问题
+            await callback.answer()
+            await bot.send_message(callback.from_user.id, """❓ 常见问题
 
 Q: 如何查询教师评价？
-A: 输入 @teacher_name，机器人会显示评价统计
+A: 输入 @teacher_name
 
-Q: 我可以评价多少次？
-A: 每个教师只能评价一次，不同教师可以多次评价
+Q: 可以评价多少次？
+A: 每个教师只能一次，不同教师可多次
 
-Q: 评价会立即显示吗？
-A: 是的，评价提交后立即保存和显示
+Q: 评价立即显示吗？
+A: 是的，立即保存和显示
 
 Q: 可以修改评价吗？
-A: 当前不支持修改，请联系管理员
+A: 不支持修改
 
-Q: 评价内容会被公开吗？
-A: 会的，所有用户都可以看到评价
+Q: 评价公开吗？
+A: 是的，所有用户都能看到
 
 Q: 如何举报不当评价？
-A: 联系管理员���提供教师名称和时间
+A: 联系管理员
 
 Q: 可以匿名评价吗？
-A: 可以使用别的账号，但机器人会记录用户ID
-
-Q: 为什么看不到我的评价？
-A: 检查教师名称是否正确，或稍后刷新
-
-Q: 机器人什么时候更新排行榜？
-A: 实时更新
-
-Q: 如何成为管理员？
-A: 使用 /myid 获取ID，告诉原管理员"""
-            
-            await callback.answer()
-            await bot.send_message(callback.from_user.id, faq_text)
+A: 可以用别账号""")
             return
-
-        # 处理联系管理员
+        
         if data == "contact_admin":
-            admin_text = """📞 联系管理员
+            await callback.answer()
+            await bot.send_message(callback.from_user.id, """📞 联系管理员
 
-如果您有任何问题或建议，可以：
+如有问题或建议：
 
 1️⃣ 在群组中反馈
-   标记管理员，描述问题
+   标记管理员
 
 2️⃣ 私聊管理员
-   获取管理员联系方式
+   获取联系方式
 
 3️⃣ 报告问题
    • 不当评价举报
-   • 机器人故障报告
-   • 功能建议反馈
+   • 机器人故障
+   • 功能建议
 
-管理员会尽快回复您！"""
+管理员会尽快回复！""")
+            return
+        
+        if data == "channel_info":
+            channels = get_all_required_channels()
+            
+            if not channels:
+                await callback.answer("❌ 未设置频道", show_alert=True)
+                return
             
             await callback.answer()
-            await bot.send_message(callback.from_user.id, admin_text)
-            return
+            
+            kb_buttons = []
+            for channel_id in channels:
+                try:
+                    channel = await bot.get_chat(channel_id)
+                    link = await get_channel_invite_link(channel_id)
+                    if link:
+                        kb_buttons.append([
+                            InlineKeyboardButton(text=f"📢 {channel.title}", url=link)
+                        ])
+                except:
+                    pass
+            
+            kb_buttons.append([InlineKeyboardButton(text="🔙 返回", callback_data="back_to_start")])
+            
+            await bot.send_message(
+                callback.from_user.id,
+                """📢 频道介绍
 
-        # 处理重新验证
+教师评价平台，帮助同学们：
+✅ 了解教师风格
+✅ 参考他人评价
+✅ 做出选课决定
+
+🎯 频道内容：
+• 热门教师排行
+• 评价统计分析
+• 用户反馈""",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+            )
+            return
+        
         if data == "retry_verify":
-            await callback.answer("正在重新验证您的身份...")
+            await callback.answer("正在重新验证...")
             from handlers.private import cmd_start
-            await cmd_start(callback.message)
-            return
-
-        # 处理返回主菜单
-        if data == "back_to_start":
-            from handlers.private import cmd_start
-            await callback.answer()
             await cmd_start(callback.message)
             return
         
-        # 处理检查订阅
-        if data == "check_subscription":
-            await callback.answer("正在检查您的订阅状态...")
+        if data == "back_to_start":
+            await callback.answer()
             from handlers.private import cmd_start
             await cmd_start(callback.message)
             return
+            
+        if data == "check_all_subscriptions":
+            channels = get_all_required_channels()
+            user_id = callback.from_user.id
+            
+            not_subscribed = []
+            for channel_id in channels:
+                try:
+                    member = await bot.get_chat_member(channel_id, user_id)
+                    if member.status in ('left', 'kicked', 'restricted'):
+                        not_subscribed.append(channel_id)
+                except:
+                    not_subscribed.append(channel_id)
+            
+            if not_subscribed:
+                await callback.answer("❌ 您还未全部加入频道", show_alert=True)
+            else:
+                await callback.answer("✅ 验证成功！")
+                from handlers.private import cmd_start
+                await cmd_start(callback.message)
+            return
 
     except Exception as e:
-        logger.error(f"处理回调时出错: {e}")
-        await callback.answer(f"❌ 出错: {str(e)}", show_alert=True)
+        logger.error(f"处理回调时出错: {e}", exc_info=True)
+        await callback.answer(f"❌ 出错: {str(e)[:50]}", show_alert=True)
