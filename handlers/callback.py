@@ -17,10 +17,12 @@ from database import (
     get_connection,
     get_teacher_all_ratings,
     delete_rating_by_id,
-    delete_teacher_data_from_db
+    delete_teacher_data_from_db,
+    get_leaderboard
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
+from utils.helpers import format_leaderboard_text
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -223,6 +225,17 @@ A: 可以用别账号""")
 • 用户反馈""",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons)
             )
+            return
+
+        if data == "show_leaderboard":
+            leaderboard = get_leaderboard(10)
+            text = format_leaderboard_text(leaderboard)
+            await callback.answer()
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+            ])
+            await bot.send_message(callback.from_user.id, text, reply_markup=kb)
             return
 
         if data == "retry_verify":
