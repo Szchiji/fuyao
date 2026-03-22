@@ -559,6 +559,78 @@ def delete_user_rating(teacher: str, user_id: int) -> dict:
         }
 
 
+def get_teacher_detail(teacher: str):
+    """
+    获取教师的评价详情（推荐数、不推荐数及理由列表）
+
+    Args:
+        teacher: 教师名称
+
+    Returns:
+        dict with keys 'yes', 'no', 'reasons', or None if no records exist
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        if USE_POSTGRES:
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = %s", (teacher,))
+            total = cursor.fetchone()[0]
+
+            if total == 0:
+                conn.close()
+                return None
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 1", (teacher,)
+            )
+            yes_count = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 0", (teacher,)
+            )
+            no_count = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT reason FROM recs WHERE teacher = %s ORDER BY time DESC", (teacher,)
+            )
+            reasons = [row[0] for row in cursor.fetchall()]
+        else:
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = ?", (teacher,))
+            total = cursor.fetchone()[0]
+
+            if total == 0:
+                conn.close()
+                return None
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 1", (teacher,)
+            )
+            yes_count = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 0", (teacher,)
+            )
+            no_count = cursor.fetchone()[0]
+
+            cursor.execute(
+                "SELECT reason FROM recs WHERE teacher = ? ORDER BY time DESC", (teacher,)
+            )
+            reasons = [row[0] for row in cursor.fetchall()]
+
+        conn.close()
+
+        return {
+            "yes": yes_count,
+            "no": no_count,
+            "reasons": reasons,
+        }
+
+    except Exception as e:
+        logger.error(f"获取教师详情失败: {e}")
+        return None
+
+
 def get_teacher_all_ratings(teacher: str) -> list:
     """
     获取某个教师的所有评价
