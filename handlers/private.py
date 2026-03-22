@@ -6,9 +6,9 @@
 
 import logging
 import re
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from database import (
     get_start_message,
@@ -119,19 +119,102 @@ async def cmd_start(message: Message):
 💡 更多帮助请输入 /帮助"""
     )
     
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📖 查看帮助", callback_data="show_help")],
-        [InlineKeyboardButton(text="⭐ 如何评价", callback_data="how_to_rate")],
-        [InlineKeyboardButton(text="🏆 教师排行榜", callback_data="show_leaderboard")],
-        [InlineKeyboardButton(text="❓ 常见问题", callback_data="faq")]
-    ])
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
+            [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")]
+        ],
+        resize_keyboard=True
+    )
     
     await message.reply(welcome, reply_markup=kb)
 
 
+# ==================== 键盘按钮文字处理 ====================
+
+@router.message(F.text == "📖 查看帮助", StateFilter(None))
+async def kb_show_help(message: Message):
+    """处理键盘按钮：查看帮助"""
+    if message.chat.type != "private":
+        return
+    await cmd_help(message)
+
+
+@router.message(F.text == "⭐ 如何评价", StateFilter(None))
+async def kb_how_to_rate(message: Message):
+    """处理键盘按钮：如何评价"""
+    if message.chat.type != "private":
+        return
+    await message.reply("""⭐ 如何评价教师
+
+步骤 1️⃣：输入教师名称
+在群组中输入: @李老师
+
+步骤 2️⃣：查看评价卡片
+机器人显示该教师的：
+• 推荐人数: 👍 5
+• 不推荐人数: 👎 2
+• 最新评价（含 ID）
+
+步骤 3️⃣：选择态度
+• 👍 推荐
+• 👎 不推荐
+
+步骤 4️⃣：填写理由
+在私聊中输入评价理由
+至少 12 个字
+
+步骤 5️⃣：提交
+评价成功后机器人会显示确认
+
+💡 小贴士：
+• 一个教师只能评价一次
+• 评价要真实客观
+• 具体说明优缺点""")
+
+
+@router.message(F.text == "🏆 教师排行榜", StateFilter(None))
+async def kb_leaderboard(message: Message):
+    """处理键盘按钮：教师排行榜"""
+    if message.chat.type != "private":
+        return
+    leaderboard = get_leaderboard(10)
+    text = format_leaderboard_text(leaderboard)
+    await message.reply(text)
+
+
+@router.message(F.text == "❓ 常见问题", StateFilter(None))
+async def kb_faq(message: Message):
+    """处理键盘按钮：常见问题"""
+    if message.chat.type != "private":
+        return
+    await message.reply("""❓ 常见问题
+
+Q: 如何查询教师评价？
+A: 输入 @teacher_name
+
+Q: 可以评价多少次？
+A: 每个教师只能一次，不同教师可多次
+
+Q: 评价立即显示吗？
+A: 是的，立即保存和显示
+
+Q: 可以修改评价吗？
+A: 不支持修改
+
+Q: 评价公开吗？
+A: 是的，所有用户都能看到
+
+Q: 如何举报不当评价？
+A: 联系管理员
+
+Q: 可以匿名评价吗？
+A: 可以用别账号""")
+
+
 @router.message(Command("help", "帮助"))
 async def cmd_help(message: Message):
-    """处理 /help 或 /帮助 命令"""
+    """处理 /help 或 /帮助 命令，以及键盘按钮"📖 查看帮助"触发"""
     help_text = """📖 完整帮助文档
 
 👥 用户命令：
