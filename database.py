@@ -75,7 +75,7 @@ def init_db():
                 )
             """)
             
-            # 设置表 - ⭐ 只有 key 和 value 两列
+            # 设置表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -105,7 +105,7 @@ def init_db():
                 )
             """)
             
-            # 设置表 - ⭐ 只有 key 和 value 两列
+            # 设置表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -301,7 +301,6 @@ def add_required_channel(channel_id: str) -> dict:
         cursor = conn.cursor()
         
         if USE_POSTGRES:
-            # 先检查是否已存在 - ⭐ 查询 value 而不是 id
             cursor.execute(
                 "SELECT value FROM settings WHERE key = %s", 
                 (f"channel_{channel_id}",)
@@ -314,13 +313,11 @@ def add_required_channel(channel_id: str) -> dict:
                     "msg": f"❌ 频道 {channel_id} 已添加过了"
                 }
             
-            # 插入新频道
             cursor.execute(
                 "INSERT INTO settings (key, value) VALUES (%s, %s)",
                 (f"channel_{channel_id}", channel_id)
             )
         else:
-            # SQLite 查询 - ⭐ 查询 value 而不是 id
             cursor.execute(
                 "SELECT value FROM settings WHERE key = ?", 
                 (f"channel_{channel_id}",)
@@ -360,16 +357,13 @@ def get_all_required_channels() -> list:
         cursor = conn.cursor()
         
         if USE_POSTGRES:
-            # ⭐ PostgreSQL LIKE 查询需要用 %s
             cursor.execute("SELECT value FROM settings WHERE key LIKE %s", ('channel_%',))
         else:
-            # ⭐ SQLite LIKE 查询
             cursor.execute("SELECT value FROM settings WHERE key LIKE ?", ('channel_%',))
         
         results = cursor.fetchall()
         conn.close()
         
-        # 提取第一列数据
         channels = [r[0] for r in results] if results else []
         logger.info(f"📋 获取到 {len(channels)} 个频道: {channels}")
         return channels
@@ -466,3 +460,163 @@ def get_encourage() -> str:
     
     import random
     return random.choice(encourages)
+
+
+# ==================== 教师数据删除函数 ====================
+
+def delete_teacher_data_from_db(teacher: str) -> dict:
+    """
+    删除某个教师的所有评价数据
+    
+    Args:
+        teacher: 教师名称
+    
+    Returns:
+        删除结果
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # 先获��统计信息
+        if USE_POSTGRES:
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = %s", (teacher,))
+            total = cursor.fetchone()[0]
+            
+            # 删除数据
+            cursor.execute("DELETE FROM recs WHERE teacher = %s", (teacher,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = ?", (teacher,))
+            total = cursor.fetchone()[0]
+            
+            # 删除数据
+            cursor.execute("DELETE FROM recs WHERE teacher = ?", (teacher,))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.warning(f"🗑️ 已删除教师 @{teacher} 的 {total} 条评价数据")
+        
+        return {
+            "success": True,
+            "msg": f"""✅ 教师数据已删除
+
+教师: @{teacher}
+删除数: {total} 条评价
+
+数据已从数据库中永久删除"""
+        }
+    
+    except Exception as e:
+        logger.error(f"删除教师数据失败: {e}")
+        return {
+            "success": False,
+            "msg": f"❌ 删除失败: {str(e)}"
+        }
+
+
+def delete_user_rating(teacher: str, user_id: int) -> dict:
+    """
+    删除某个用户对某个教师的评价
+    
+    Args:
+        teacher: 教师名称
+        user_id: 用户 ID
+    
+    Returns:
+        删除结果
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if USE_POSTGRES:
+            cursor.execute(
+                "DELETE FROM recs WHERE teacher = %s AND user_id = %s",
+                (teacher, user_id)
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM recs WHERE teacher = ? AND user_id = ?",
+                (teacher, user_id)
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        logger.warning(f"🗑️ 已删除用户 {user_id} 对教师 @{teacher} 的评价")
+        
+        return {
+            "success": True,
+            "msg": f"✅ 评价已删除"
+        }
+    
+    except Exception as e:
+        logger.error(f"删除评价失败: {e}")
+        return {
+            "success": False,
+            "msg": f"❌ 删除失败: {str(e)}"
+        }
+
+
+def get_teacher_all_ratings(teacher: str) -> list:
+    """
+    获取某个教师的所有评价
+    
+    Args:
+        teacher: 教师名称
+    
+    Returns:
+        评价列表
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if USE_POSTGRES:
+            cursor.execute(
+                "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC",
+                (teacher,)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC",
+                (teacher,)
+            )
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results if results else []
+    
+    except Exception as e:
+        logger.error(f"获取教师评价失败: {e}")
+        return []
+
+
+def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
+    """删除指定 ID 的评价"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if USE_POSTGRES:
+            cursor.execute("DELETE FROM recs WHERE id = %s AND teacher = %s", (int(rating_id), teacher))
+        else:
+            cursor.execute("DELETE FROM recs WHERE id = ? AND teacher = ?", (int(rating_id), teacher))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.warning(f"🗑️ 删除了评价 ID: {rating_id}")
+        
+        return {
+            "success": True,
+            "msg": f"✅ 评价已删除"
+        }
+    except Exception as e:
+        logger.error(f"删除评价失败: {e}")
+        return {
+            "success": False,
+            "msg": f"❌ 删除失败: {str(e)}"
+        }
