@@ -6,7 +6,7 @@
 import logging
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database import (
     add_required_channel,
     remove_required_channel,
@@ -55,7 +55,7 @@ async def admin_menu(message: Message):
 • 评价教师数: {stats['total_teacher']}
 • 今日评价: {stats['today']}
 
-🔐 频道管理：
+🔐 频道管理���
 • 状态: {channel_status}
 
 ⚙️ 管理命令：
@@ -307,7 +307,7 @@ async def show_db(message: Message):
 • 总评价: {total}
 • 教师数: {teachers}
 • 👍 推荐: {rec}
-• �� 不推荐: {not_rec}
+• 👎 不推荐: {not_rec}
 
 💾 数据库状态: ✅ 正常"""
         
@@ -406,7 +406,7 @@ async def manage_teacher(message: Message):
 
 📊 统计信息:
 • 总评价数: {stats['total']}
-• �� 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
+• 👍 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
 • 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
 
 ⚙️ 管理操作:
@@ -429,7 +429,7 @@ async def manage_teacher(message: Message):
 @router.message(Command("查看评价"))
 @admin_only
 async def view_teacher_ratings(message: Message):
-    """查看某个教师的所有评价"""
+    """查看某个教师的所有评价 - 支持点击跳转私聊"""
     try:
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2:
@@ -444,12 +444,14 @@ async def view_teacher_ratings(message: Message):
             await message.reply(f"""❌ 教师 @{teacher_name} 没有任何评价""")
             return
         
-        # 构建评价列表
+        # 构建评价列表 - 使用按钮跳转私聊
         text = f"""📝 教师 @{teacher_name} 的所有评价 ({len(ratings)} 条)
 
 """
         
-        for i, rating in enumerate(ratings[:10], 1):
+        kb_buttons = []
+        
+        for i, rating in enumerate(ratings[:10], 1):  # 最多显示10条
             rating_id = rating[0]
             user_id = rating[1]
             recommend = rating[2]
@@ -457,17 +459,39 @@ async def view_teacher_ratings(message: Message):
             time = rating[4]
             
             emoji = "👍" if recommend else "👎"
-            text += f"""{i}. {emoji} 用户 {user_id}
+            text += f"""{i}. {emoji} 用户 ID: {user_id}
    理由: {reason[:50]}...
    时间: {time}
-   删除: /删除评价 {teacher_name} {rating_id}
 
 """
+            
+            # 添加跳转按钮 - 点击可以私聊该用户
+            btn_text = f"{emoji} 用户 {user_id}"
+            kb_buttons.append([
+                InlineKeyboardButton(
+                    text=btn_text,
+                    callback_data=f"jump_user|{user_id}|{teacher_name}|{rating_id}"
+                ),
+                InlineKeyboardButton(
+                    text="🗑️ 删",
+                    callback_data=f"delete_rating|{teacher_name}|{rating_id}"
+                )
+            ])
         
         if len(ratings) > 10:
             text += f"\n... 还有 {len(ratings) - 10} 条评价"
         
-        await message.reply(text)
+        # 添加删除全部按钮
+        kb_buttons.append([
+            InlineKeyboardButton(
+                text="🗑️ 删除该教师全部数据",
+                callback_data=f"delete_all_teacher|{teacher_name}"
+            )
+        ])
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+        
+        await message.reply(text, reply_markup=kb)
         logger.info(f"✅ 管理员 {message.from_user.id} 查看教师 @{teacher_name} 的评价")
         
     except IndexError:
