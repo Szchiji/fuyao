@@ -256,6 +256,7 @@ A: 可以用别账号""", reply_markup=kb)
         if data == "back_to_start":
             await callback.answer()
             from database import get_start_message
+            from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
             welcome = get_start_message(
                 """👋 欢迎使用狼评机器人！🎓
 
@@ -268,13 +269,14 @@ A: 可以用别账号""", reply_markup=kb)
 
 💡 更多帮助请输入 /帮助"""
             )
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📖 查看帮助", callback_data="show_help")],
-                [InlineKeyboardButton(text="⭐ 如何评价", callback_data="how_to_rate")],
-                [InlineKeyboardButton(text="🏆 教师排行榜", callback_data="show_leaderboard")],
-                [InlineKeyboardButton(text="❓ 常见问题", callback_data="faq")]
-            ])
-            await callback.message.edit_text(welcome, reply_markup=kb)
+            kb = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
+                    [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")]
+                ],
+                resize_keyboard=True
+            )
+            await callback.message.answer(welcome, reply_markup=kb)
             return
 
         if data == "check_all_subscriptions":
@@ -323,8 +325,7 @@ A: 可以用别账号""", reply_markup=kb)
 请点击下方按钮进行操作："""
 
             await callback.answer()
-            await bot.send_message(
-                callback.from_user.id,
+            await callback.message.edit_text(
                 menu_text,
                 reply_markup=build_admin_menu_keyboard()
             )
@@ -353,7 +354,7 @@ A: 可以用别账号""", reply_markup=kb)
                 [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
             ])
             await callback.answer()
-            await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+            await callback.message.edit_text(text, reply_markup=kb)
             return
 
         if data == "admin_db":
@@ -393,7 +394,7 @@ A: 可以用别账号""", reply_markup=kb)
                     [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
                 ])
                 await callback.answer()
-                await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+                await callback.message.edit_text(text, reply_markup=kb)
             except Exception as e:
                 await callback.answer(f"❌ 错误: {str(e)[:50]}", show_alert=True)
             return
@@ -411,7 +412,7 @@ A: 可以用别账号""", reply_markup=kb)
                     [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
                 ])
                 await callback.answer()
-                await bot.send_message(callback.from_user.id, "❌ 未添加任何频道", reply_markup=kb)
+                await callback.message.edit_text("❌ 未添加任何频道", reply_markup=kb)
                 return
 
             text = f"📋 已添加频道 ({len(channels)} 个)\n\n"
@@ -436,8 +437,7 @@ A: 可以用别账号""", reply_markup=kb)
             ])
 
             await callback.answer()
-            await bot.send_message(
-                callback.from_user.id,
+            await callback.message.edit_text(
                 text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons)
             )
@@ -465,7 +465,7 @@ A: 可以用别账号""", reply_markup=kb)
             ])
 
             await callback.answer()
-            await bot.send_message(callback.from_user.id, confirm_text, reply_markup=kb)
+            await callback.message.edit_text(confirm_text, reply_markup=kb)
             return
 
         if data.startswith("confirm_delete_channel|"):
@@ -481,7 +481,7 @@ A: 可以用别账号""", reply_markup=kb)
                 [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
             ])
             await callback.answer()
-            await bot.send_message(callback.from_user.id, result["msg"], reply_markup=kb)
+            await callback.message.edit_text(result["msg"], reply_markup=kb)
             logger.info(f"✅ 管理员 {callback.from_user.id} 通过按钮删除频道 {ch_id}")
             return
 
@@ -513,7 +513,7 @@ A: 可以用别账号""", reply_markup=kb)
                 [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
             ])
             await callback.answer()
-            await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+            await callback.message.edit_text(text, reply_markup=kb)
             return
 
         if data == "admin_diagnose":
@@ -527,7 +527,8 @@ A: 可以用别账号""", reply_markup=kb)
                 await callback.answer("❌ 未添加任何频道", show_alert=True)
                 return
 
-            await callback.answer("🔧 诊断中...")
+            await callback.answer()
+            await callback.message.edit_text(f"🔧 诊断中，请稍候...（共 {len(channels)} 个频道）")
 
             try:
                 text = "🔧 诊断报告\n\n"
@@ -555,10 +556,13 @@ A: 可以用别账号""", reply_markup=kb)
                 kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
                 ])
-                await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+                await callback.message.edit_text(text, reply_markup=kb)
             except Exception as e:
                 logger.error(f"诊断失败: {e}")
-                await bot.send_message(callback.from_user.id, f"❌ 诊断失败: {e}")
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+                ])
+                await callback.message.edit_text(f"❌ 诊断失败: {e}", reply_markup=kb)
             return
 
         if data == "admin_add_channel":
@@ -572,8 +576,7 @@ A: 可以用别账号""", reply_markup=kb)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
             ])
-            await bot.send_message(
-                callback.from_user.id,
+            await callback.message.edit_text(
                 """➕ 添加频道
 
 请发送频道 ID（格式: -1001234567890）
@@ -599,8 +602,7 @@ A: 可以用别账号""", reply_markup=kb)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
             ])
-            await bot.send_message(
-                callback.from_user.id,
+            await callback.message.edit_text(
                 """✏️ 设置欢迎语
 
 请发送新的欢迎语内容：
@@ -626,8 +628,7 @@ A: 可以用别账号""", reply_markup=kb)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
             ])
-            await bot.send_message(
-                callback.from_user.id,
+            await callback.message.edit_text(
                 """👨‍🏫 管理教师
 
 请发送要管理的教师名称（可带或不带 @）：
@@ -666,8 +667,7 @@ A: 可以用别账号""", reply_markup=kb)
 请点击下方按钮进行操作："""
 
             await callback.answer("✅ 已取消")
-            await bot.send_message(
-                callback.from_user.id,
+            await callback.message.edit_text(
                 menu_text,
                 reply_markup=build_admin_menu_keyboard()
             )
@@ -705,10 +705,10 @@ A: 可以用别账号""", reply_markup=kb)
 点击下方菜单按钮，所有操作均可通过按钮完成！"""
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🛠️ 打开管理菜单", callback_data="admin_menu")]
+                [InlineKeyboardButton(text="🛠️ 返回管理菜单", callback_data="admin_menu")]
             ])
             await callback.answer()
-            await bot.send_message(callback.from_user.id, help_text, reply_markup=kb)
+            await callback.message.edit_text(help_text, reply_markup=kb)
             return
 
         if data.startswith("view_teacher_ratings|"):
@@ -727,7 +727,7 @@ A: 可以用别账号""", reply_markup=kb)
             text, kb = build_ratings_view(teacher_name, ratings)
 
             await callback.answer()
-            await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+            await callback.message.edit_text(text, reply_markup=kb)
             logger.info(f"✅ 管理员 {callback.from_user.id} 通过按钮查看教师 @{teacher_name} 的评价")
             return
 
@@ -773,8 +773,7 @@ ID: <code>{user_id}</code>
                         ])
 
                         await callback.answer()
-                        await bot.send_message(
-                            callback.from_user.id,
+                        await callback.message.edit_text(
                             info_text,
                             reply_markup=kb
                         )
@@ -819,11 +818,7 @@ ID: <code>{user_id}</code>
                 ])
 
                 await callback.answer()
-                await bot.send_message(
-                    callback.from_user.id,
-                    confirm_text,
-                    reply_markup=kb
-                )
+                await callback.message.edit_text(confirm_text, reply_markup=kb)
 
                 logger.info(f"⚠️ 管理员 {callback.from_user.id} 请求删除评价 {rating_id}")
             return
@@ -850,11 +845,7 @@ ID: <code>{user_id}</code>
                 ])
 
                 await callback.answer()
-                await bot.send_message(
-                    callback.from_user.id,
-                    result["msg"],
-                    reply_markup=kb
-                )
+                await callback.message.edit_text(result["msg"], reply_markup=kb)
 
                 if result["success"]:
                     logger.warning(f"🗑️ 管理员 {callback.from_user.id} 删除了评价 {rating_id}")
@@ -890,11 +881,7 @@ ID: <code>{user_id}</code>
             ])
 
             await callback.answer()
-            await bot.send_message(
-                callback.from_user.id,
-                confirm_text,
-                reply_markup=kb
-            )
+            await callback.message.edit_text(confirm_text, reply_markup=kb)
 
             logger.info(f"⚠️ 管理员 {callback.from_user.id} 请求删除教师 @{teacher_name} 的全部数据")
             return
@@ -914,11 +901,7 @@ ID: <code>{user_id}</code>
             ])
 
             await callback.answer()
-            await bot.send_message(
-                callback.from_user.id,
-                result["msg"],
-                reply_markup=kb
-            )
+            await callback.message.edit_text(result["msg"], reply_markup=kb)
 
             if result["success"]:
                 logger.warning(f"🗑️ 管理员 {callback.from_user.id} 删除了教师 @{teacher_name} 的全部数据")
@@ -941,17 +924,35 @@ ID: <code>{user_id}</code>
             text, kb = build_ratings_view(teacher_name, ratings)
 
             await callback.answer()
-            await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+            await callback.message.edit_text(text, reply_markup=kb)
             logger.info(f"✅ 返回教师 @{teacher_name} 的评价列表")
             return
 
         # ==================== 取消删除 ====================
         if data == "cancel_delete":
-            await callback.answer()
-            await bot.send_message(
-                callback.from_user.id,
-                "✅ 删除已取消"
-            )
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            from handlers.admin import build_admin_menu_keyboard
+            stats = get_global_stats()
+            channels = get_all_required_channels()
+            channel_status = f"✅ {len(channels)} 个频道" if channels else "❌ 未设置"
+
+            menu_text = f"""🛠️ 管理员后台
+
+📊 统计数据：
+• 总评价数: {stats['total_eval']}
+• 评价教师数: {stats['total_teacher']}
+• 今日评价: {stats['today']}
+
+🔐 频道管理：
+• 状态: {channel_status}
+
+请点击下方按钮进行操作："""
+
+            await callback.answer("✅ 删除已取消")
+            await callback.message.edit_text(menu_text, reply_markup=build_admin_menu_keyboard())
             return
 
     except Exception as e:
