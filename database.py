@@ -9,43 +9,48 @@ import os
 from datetime import datetime
 from config import MIN_REASON_LENGTH
 
-try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    HAS_POSTGRES = True
-except ImportError:
-    HAS_POSTGRES = False
-
 logger = logging.getLogger(__name__)
 
-# 检查数据库类型
-DB_TYPE = os.getenv("DATABASE_URL")
-USE_POSTGRES = DB_TYPE is not None and HAS_POSTGRES
+# ⭐ 检查是否配置了 PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL")
+USE_POSTGRES = DATABASE_URL is not None
 
 if USE_POSTGRES:
+    logger.info("✅ 使用 PostgreSQL 数据库")
     import psycopg2
     from psycopg2.extras import RealDictCursor
 else:
+    logger.info("⚠️ 使用 SQLite 数据库（推荐配置 PostgreSQL）")
     from config import DATABASE_PATH
 
 def get_connection():
     """获取数据库连接"""
     if USE_POSTGRES:
         try:
-            conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+            conn = psycopg2.connect(DATABASE_URL)
+            logger.debug("✅ PostgreSQL 连接成功")
             return conn
         except Exception as e:
-            logger.error(f"PostgreSQL 连接失败: {e}")
+            logger.error(f"❌ PostgreSQL 连接失败: {e}")
             raise
     else:
         # SQLite
-        db_dir = os.path.dirname(DATABASE_PATH)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
-        
-        conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            from config import DATABASE_PATH
+            db_dir = os.path.dirname(DATABASE_PATH)
+            
+            # 确保目录存在
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+                logger.info(f"📁 创建数据库目录: {db_dir}")
+            
+            conn = sqlite3.connect(DATABASE_PATH)
+            conn.row_factory = sqlite3.Row
+            logger.debug("✅ SQLite 连接成功")
+            return conn
+        except Exception as e:
+            logger.error(f"❌ SQLite 连接失败: {e}")
+            raise
 
 def init_db():
     """初始化数据库"""
@@ -54,6 +59,8 @@ def init_db():
         cursor = conn.cursor()
         
         if USE_POSTGRES:
+            logger.info("📊 初始��� PostgreSQL 表...")
+            
             # PostgreSQL 表定义
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recs (
@@ -75,10 +82,15 @@ def init_db():
             """)
             
             # 创建索引
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
+            try:
+                cursor.execute("CREATE INDEX idx_teacher ON recs(teacher)")
+                cursor.execute("CREATE INDEX idx_user ON recs(user_id)")
+                cursor.execute("CREATE INDEX idx_time ON recs(time)")
+            except:
+                pass  # 索引可能已存在
         else:
+            logger.info("📊 初始化 SQLite 表...")
+            
             # SQLite 表定义
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recs (
@@ -120,7 +132,11 @@ def check_user_rated_teacher(teacher: str, user_id: int) -> bool:
         conn = get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT id FROM recs WHERE teacher = %s AND user_id = %s" if USE_POSTGRES else "SELECT id FROM recs WHERE teacher = ? AND user_id = ?", (teacher, user_id))
+        if USE_POSTGRES:
+            cursor.execute("SELECT id FROM recs WHERE teacher = %s AND user_id = %s", (teacher, user_id))
+        else:
+            cursor.execute("SELECT id FROM recs WHERE teacher = ? AND user_id = ?", (teacher, user_id))
+        
         result = cursor.fetchone()
         conn.close()
         
@@ -148,8 +164,16 @@ def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> d
         conn = get_connection()
         cursor = conn.cursor()
         
-        sql = "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (%s, %s, %s, %s)" if USE_POSTGRES else "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (?, ?, ?, ?)"
-        cursor.execute(sql, (teacher, user_id, recommend, reason))
+        if USE_POSTGRES:
+            cursor.execute(
+                "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (%s, %s, %s, %s)",
+                (teacher, user_id, recommend, reason)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (?, ?, ?, ?)",
+                (teacher, user_id, recommend, reason)
+            )
         
         conn.commit()
         conn.close()
@@ -174,22 +198,36 @@ def get_teacher_stats(teacher: str) -> dict:
         conn = get_connection()
         cursor = conn.cursor()
         
-        sql_count = "SELECT COUNT(*) FROM recs WHERE teacher = %s" if USE_POSTGRES else "SELECT COUNT(*) FROM recs WHERE teacher = ?"
-        sql_rec = "SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 1" if USE_POSTGRES else "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 1"
-        sql_not_rec = "SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 0" if USE_POSTGRES else "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 0"
-        sql_latest = "SELECT user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC LIMIT 3" if USE_POSTGRES else "SELECT user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC LIMIT 3"
-        
-        cursor.execute(sql_count, (teacher,))
-        total = cursor.fetchone()[0]
-        
-        cursor.execute(sql_rec, (teacher,))
-        recommend_count = cursor.fetchone()[0]
-        
-        cursor.execute(sql_not_rec, (teacher,))
-        not_recommend_count = cursor.fetchone()[0]
-        
-        cursor.execute(sql_latest, (teacher,))
-        latest = cursor.fetchall()
+        if USE_POSTGRES:
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = %s", (teacher,))
+            total = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 1", (teacher,))
+            recommend_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 0", (teacher,))
+            not_recommend_count = cursor.fetchone()[0]
+            
+            cursor.execute(
+                "SELECT user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC LIMIT 3",
+                (teacher,)
+            )
+            latest = cursor.fetchall()
+        else:
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = ?", (teacher,))
+            total = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 1", (teacher,))
+            recommend_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 0", (teacher,))
+            not_recommend_count = cursor.fetchone()[0]
+            
+            cursor.execute(
+                "SELECT user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC LIMIT 3",
+                (teacher,)
+            )
+            latest = cursor.fetchall()
         
         conn.close()
         
@@ -217,16 +255,26 @@ def get_global_stats() -> dict:
         conn = get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT COUNT(*) FROM recs")
-        total_eval = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(DISTINCT teacher) FROM recs")
-        total_teacher = cursor.fetchone()[0]
-        
-        today = datetime.now().date()
-        sql = "SELECT COUNT(*) FROM recs WHERE DATE(time) = %s" if USE_POSTGRES else "SELECT COUNT(*) FROM recs WHERE DATE(time) = ?"
-        cursor.execute(sql, (today,))
-        today_count = cursor.fetchone()[0]
+        if USE_POSTGRES:
+            cursor.execute("SELECT COUNT(*) FROM recs")
+            total_eval = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(DISTINCT teacher) FROM recs")
+            total_teacher = cursor.fetchone()[0]
+            
+            today = datetime.now().date()
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE DATE(time) = %s", (today,))
+            today_count = cursor.fetchone()[0]
+        else:
+            cursor.execute("SELECT COUNT(*) FROM recs")
+            total_eval = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(DISTINCT teacher) FROM recs")
+            total_teacher = cursor.fetchone()[0]
+            
+            today = datetime.now().date()
+            cursor.execute("SELECT COUNT(*) FROM recs WHERE DATE(time) = ?", (today,))
+            today_count = cursor.fetchone()[0]
         
         conn.close()
         
@@ -250,12 +298,16 @@ def set_required_channel(channel_id: str):
         conn = get_connection()
         cursor = conn.cursor()
         
-        sql = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s" if USE_POSTGRES else "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
-        
         if USE_POSTGRES:
-            cursor.execute(sql, ("required_channel", channel_id, channel_id))
+            cursor.execute(
+                "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s",
+                ("required_channel", channel_id, channel_id)
+            )
         else:
-            cursor.execute(sql, ("required_channel", channel_id))
+            cursor.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("required_channel", channel_id)
+            )
         
         conn.commit()
         conn.close()
@@ -270,8 +322,11 @@ def get_required_channel() -> str:
         conn = get_connection()
         cursor = conn.cursor()
         
-        sql = "SELECT value FROM settings WHERE key = %s" if USE_POSTGRES else "SELECT value FROM settings WHERE key = ?"
-        cursor.execute(sql, ("required_channel",))
+        if USE_POSTGRES:
+            cursor.execute("SELECT value FROM settings WHERE key = %s", ("required_channel",))
+        else:
+            cursor.execute("SELECT value FROM settings WHERE key = ?", ("required_channel",))
+        
         result = cursor.fetchone()
         conn.close()
         
@@ -287,12 +342,16 @@ def set_start_message(message: str):
         conn = get_connection()
         cursor = conn.cursor()
         
-        sql = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s" if USE_POSTGRES else "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
-        
         if USE_POSTGRES:
-            cursor.execute(sql, ("start_message", message, message))
+            cursor.execute(
+                "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s",
+                ("start_message", message, message)
+            )
         else:
-            cursor.execute(sql, ("start_message", message))
+            cursor.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("start_message", message)
+            )
         
         conn.commit()
         conn.close()
@@ -307,8 +366,11 @@ def get_start_message(default: str = "") -> str:
         conn = get_connection()
         cursor = conn.cursor()
         
-        sql = "SELECT value FROM settings WHERE key = %s" if USE_POSTGRES else "SELECT value FROM settings WHERE key = ?"
-        cursor.execute(sql, ("start_message",))
+        if USE_POSTGRES:
+            cursor.execute("SELECT value FROM settings WHERE key = %s", ("start_message",))
+        else:
+            cursor.execute("SELECT value FROM settings WHERE key = ?", ("start_message",))
+        
         result = cursor.fetchone()
         conn.close()
         
