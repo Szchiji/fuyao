@@ -1,54 +1,64 @@
 # bot.py
+"""
+Telegram 机器人主程序
+"""
+
 import asyncio
 import logging
-import os
-from pathlib import Path
-
-from aiogram import Dispatcher
+from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 
 from config import TELEGRAM_BOT_TOKEN
 from database import init_db
-from bot_instance import bot
 
-# 导入路由处理器
+# 导入路由器
 from handlers.private import router as private_router
-from handlers.group import router as group_router
-from handlers.callback import router as callback_router
 from handlers.admin import router as admin_router
+from handlers.callback import router as callback_router
+from handlers.rating import router as rating_router
 
-# 配置日志
+# 设置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# 创建数据库目录
-db_dir = Path(os.getenv("DATABASE_PATH", "/app/data/wolf_recs.db")).parent
-db_dir.mkdir(parents=True, exist_ok=True)
-
-# 创建 Dispatcher
-dp = Dispatcher(storage=MemoryStorage())
-
-# 注册所有路由
-dp.include_router(private_router)
-dp.include_router(group_router)
-dp.include_router(callback_router)
-dp.include_router(admin_router)
+# 初始化数据库
+init_db()
 
 async def main():
-    """启动机器人"""
+    """主函数"""
+    # 创建存储
+    storage = MemoryStorage()
+    
+    # 创建 Bot 实例
+    bot = Bot(
+        token=TELEGRAM_BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode="HTML")
+    )
+    
+    # 创建 Dispatcher
+    dp = Dispatcher(storage=storage)
+    
+    # 注册所有路由器
+    dp.include_router(private_router)
+    dp.include_router(admin_router)
+    dp.include_router(callback_router)
+    dp.include_router(rating_router)
+    
+    logger.info("✅ 狼评机器人已启动")
+    logger.info("🔄 开始轮询更新...")
+    
     try:
-        init_db()
-        logger.info("✅ 数据库初始化成功")
-        logger.info("✅ 狼评机器人已启动")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    except Exception as e:
-        logger.error(f"❌ 启动失败: {e}")
-        raise
+        # 启动轮询
+        await dp.start_polling(bot)
+    except KeyboardInterrupt:
+        logger.info("⛔ 机器人已停止")
     finally:
         await bot.session.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
