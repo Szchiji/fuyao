@@ -211,7 +211,7 @@ def get_teacher_stats(teacher: str) -> dict:
             not_recommend_count = cursor.fetchone()[0]
             
             cursor.execute(
-                "SELECT user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC LIMIT 3",
+                "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC LIMIT 3",
                 (teacher,)
             )
             latest = cursor.fetchall()
@@ -226,7 +226,7 @@ def get_teacher_stats(teacher: str) -> dict:
             not_recommend_count = cursor.fetchone()[0]
             
             cursor.execute(
-                "SELECT user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC LIMIT 3",
+                "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC LIMIT 3",
                 (teacher,)
             )
             latest = cursor.fetchall()
