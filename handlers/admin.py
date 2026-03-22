@@ -17,14 +17,21 @@ from database import (
 )
 from utils.decorators import admin_only
 from bot_instance import bot
-from config import ADMIN_IDS
 
 logger = logging.getLogger(__name__)
+
+# ⭐ 创建路由器
 router = Router()
 
+# ⭐ 在加载时输出日志
+logger.info("🚀 加载 admin_router...")
+
+from config import ADMIN_IDS
 logger.info(f"📝 admin_router 已创建，管理员数: {len(ADMIN_IDS)}")
+logger.info(f"📝 管理员 ID 列表: {ADMIN_IDS}")
 
 
+# ==================== /管理 命令 ====================
 @router.message(Command("管理"))
 @admin_only
 async def admin_menu(message: Message):
@@ -59,6 +66,7 @@ async def admin_menu(message: Message):
     await message.reply(menu_text)
 
 
+# ==================== /添加频道 命令 ====================
 @router.message(Command("添加频道"))
 @admin_only
 async def add_channel(message: Message):
@@ -79,6 +87,7 @@ async def add_channel(message: Message):
         
         result = add_required_channel(channel_id)
         await message.reply(result["msg"])
+        logger.info(f"✅ 管理员 {message.from_user.id} 添加频道 {channel_id}")
         
     except IndexError:
         await message.reply("""❌ 用法错误
@@ -87,6 +96,7 @@ async def add_channel(message: Message):
 /添加频道 -1001234567890""")
 
 
+# ==================== /删除频道 命令 ====================
 @router.message(Command("删除频道"))
 @admin_only
 async def remove_channel(message: Message):
@@ -99,6 +109,7 @@ async def remove_channel(message: Message):
         channel_id = parts[1].strip()
         result = remove_required_channel(channel_id)
         await message.reply(result["msg"])
+        logger.info(f"✅ 管理员 {message.from_user.id} 删除频道 {channel_id}")
         
     except IndexError:
         await message.reply("""❌ 用法错误
@@ -107,6 +118,7 @@ async def remove_channel(message: Message):
 /删除频道 -1001234567890""")
 
 
+# ==================== /频道列表 命令 ====================
 @router.message(Command("频道列表"))
 @admin_only
 async def list_channels(message: Message):
@@ -119,7 +131,7 @@ async def list_channels(message: Message):
 使用 /添加频道 [ID] 添加频道""")
         return
     
-    logger.info(f"✅ 用户 {message.from_user.id} 查看频道列表")
+    logger.info(f"✅ 管理员 {message.from_user.id} 查看频道列表")
     
     text = f"""📋 已添加频道 ({len(channels)} 个)
 
@@ -129,13 +141,15 @@ async def list_channels(message: Message):
         try:
             ch = await bot.get_chat(ch_id)
             count = await bot.get_chat_member_count(ch_id)
-            text += f"{i}. {ch.title}\n   ID: {ch_id}\n   成员: {count}\n\n"
-        except:
+            text += f"{i}. {ch.title}\n   📌 ID: {ch_id}\n   👥 成员: {count}\n   🗑️ 删除: /删除频道 {ch_id}\n\n"
+        except Exception as e:
+            logger.error(f"获取频道信息失败: {e}")
             text += f"{i}. (获取失败) ID: {ch_id}\n\n"
     
     await message.reply(text)
 
 
+# ==================== /测试频道 命令 ====================
 @router.message(Command("测试频道"))
 @admin_only
 async def test_channel(message: Message):
@@ -146,7 +160,7 @@ async def test_channel(message: Message):
         await message.reply("❌ 未添加任何频道")
         return
     
-    logger.info(f"✅ 测试 {len(channels)} 个频道")
+    logger.info(f"✅ 管理员 {message.from_user.id} 测试频道")
     
     text = f"""🧪 频道测试 ({len(channels)} 个)
 
@@ -157,13 +171,16 @@ async def test_channel(message: Message):
             ch = await bot.get_chat(ch_id)
             mem = await bot.get_chat_member(ch_id, bot.id)
             is_admin = mem.status == "administrator"
-            text += f"{i}. {'✅' if is_admin else '❌'} {ch.title}\n   状态: {mem.status}\n\n"
+            status_emoji = "✅" if is_admin else "❌"
+            text += f"{i}. {status_emoji} {ch.title}\n   📌 ID: {ch_id}\n   🤖 状态: {mem.status}\n\n"
         except Exception as e:
+            logger.error(f"测试频道失败: {e}")
             text += f"{i}. ❌ 错误: {str(e)[:30]}\n\n"
     
     await message.reply(text)
 
 
+# ==================== /诊断频道 命令 ====================
 @router.message(Command("诊断频道"))
 @admin_only
 async def debug_channel(message: Message):
@@ -182,7 +199,7 @@ async def debug_channel(message: Message):
         text = "🔧 诊断报告\n\n"
         
         for idx, ch_id in enumerate(channels, 1):
-            text += f"\n━━━ 频道 {idx} ━━━\n"
+            text += f"\n━━━ 频道 {idx}/{len(channels)} ━━━\n"
             
             try:
                 ch = await bot.get_chat(ch_id)
@@ -194,6 +211,11 @@ async def debug_channel(message: Message):
                 
                 count = await bot.get_chat_member_count(ch_id)
                 text += f"✅ 成员: {count}\n"
+                
+                if is_admin:
+                    text += f"✅ 频道连接正常\n"
+                else:
+                    text += f"❌ 机器人不是管理员，需要添加管理员权限\n"
             except Exception as e:
                 text += f"❌ 错误: {str(e)[:50]}\n"
         
@@ -203,6 +225,7 @@ async def debug_channel(message: Message):
         await bot.edit_message_text(f"❌ 诊断失败: {e}", message.chat.id, msg.message_id)
 
 
+# ==================== /设置欢迎语 命令 ====================
 @router.message(Command("设置欢迎语"))
 @admin_only
 async def set_welcome(message: Message):
@@ -214,32 +237,38 @@ async def set_welcome(message: Message):
         
         welcome_msg = parts[1]
         set_start_message(welcome_msg)
-        await message.reply(f"✅ 欢迎语已更新:\n{welcome_msg}")
+        await message.reply(f"✅ 欢迎语已更新:\n\n{welcome_msg}")
+        logger.info(f"✅ 管理员 {message.from_user.id} 设置欢迎语")
         
     except IndexError:
         await message.reply("❌ 用法错误\n\n/设置欢迎语 [内容]")
 
 
+# ==================== /统计 命令 ====================
 @router.message(Command("统计"))
 @admin_only
 async def show_stats(message: Message):
     """显示统计"""
     stats = get_global_stats()
     
+    avg = round(stats['total_eval']/max(1, stats['total_teacher']), 2)
+    
     text = f"""📊 详细统计
 
 📈 评价数据：
-• 总数: {stats['total_eval']}
-• 教师数: {stats['total_teacher']}
-• 今日: {stats['today']}
+• 总评价数: {stats['total_eval']}
+• 评价教师数: {stats['total_teacher']}
+• 今日评价: {stats['today']}
 
-平均: {round(stats['total_eval']/max(1, stats['total_teacher']), 2)}
+📊 平均每个教师评价数: {avg}
 
-运行: ✅ 正常"""
+🔄 运行状态: ✅ 正常"""
     
     await message.reply(text)
+    logger.info(f"✅ 管理员 {message.from_user.id} 查看统计")
 
 
+# ==================== /数据库 命令 ====================
 @router.message(Command("数据库"))
 @admin_only
 async def show_db(message: Message):
@@ -267,16 +296,19 @@ async def show_db(message: Message):
 📈 统计：
 • 总评价: {total}
 • 教师数: {teachers}
-• 推荐: {rec}
-• 不推荐: {not_rec}
+• 👍 推荐: {rec}
+• 👎 不推荐: {not_rec}
 
-💾 状态: ✅ 正常"""
+💾 数据库状态: ✅ 正常"""
         
         await message.reply(text)
+        logger.info(f"✅ 管理员 {message.from_user.id} 查看数据库")
     except Exception as e:
+        logger.error(f"获取数据库信息失败: {e}")
         await message.reply(f"❌ 错误: {e}")
-        
 
+
+# ==================== /管理帮助 命令 ====================
 @router.message(Command("管理帮助"))
 @admin_only
 async def admin_help(message: Message):
@@ -284,22 +316,22 @@ async def admin_help(message: Message):
     help_text = """📖 管理员帮助
 
 🎛️ 基础命令：
-/管理 - 显示管理后台
-/统计 - 查看统计数据
-/数据库 - 查看数据库信息
+• /管理 - 显示管理后台
+• /统计 - 查看统计数据
+• /数据库 - 查看数据库信息
 
 🔐 频道管理：
-/添加频道 [ID] - 添加频道要求
-/删除频道 [ID] - 删除频道要求  
-/频道列表 - 查看所有频道
-/测试频道 - 测试所有频道
-/诊断频道 - 深度诊断频道
+• /添加频道 [ID] - 添加频道要求
+• /删除频道 [ID] - 删除频道要求  
+• /频道列表 - 查看所有频道
+• /测试频道 - 测试所有频道
+• /诊断频道 - 深度诊断频道
 
 ✏️ 内容管理：
-/设置欢迎语 [欢迎语] - 设置欢迎语
+• /设置欢迎语 [欢迎语] - 设置欢迎语
 
 ❓ 其他：
-/管理帮助 - 显示此帮助
+• /管理帮助 - 显示此帮助
 
 💡 使用示例:
 
@@ -319,4 +351,4 @@ async def admin_help(message: Message):
    /设置欢迎语 欢迎使用狼评机器人！"""
     
     await message.reply(help_text)
-    
+    logger.info(f"✅ 管理员 {message.from_user.id} 查看管理帮助")
