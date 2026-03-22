@@ -62,6 +62,7 @@ def init_db():
         if USE_POSTGRES:
             logger.info("📊 初始化 PostgreSQL 表...")
             
+            # 评价表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recs (
                     id SERIAL PRIMARY KEY,
@@ -74,6 +75,7 @@ def init_db():
                 )
             """)
             
+            # 设置表 - ⭐ 只有 key 和 value 两列
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -90,6 +92,7 @@ def init_db():
         else:
             logger.info("📊 初始化 SQLite 表...")
             
+            # 评价表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +105,7 @@ def init_db():
                 )
             """)
             
+            # 设置表 - ⭐ 只有 key 和 value 两列
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -288,7 +292,8 @@ def get_global_stats() -> dict:
             "total_teacher": 0,
             "today": 0
         }
-        
+
+
 def add_required_channel(channel_id: str) -> dict:
     """添加频道要求"""
     try:
@@ -296,24 +301,33 @@ def add_required_channel(channel_id: str) -> dict:
         cursor = conn.cursor()
         
         if USE_POSTGRES:
-            cursor.execute("SELECT id FROM settings WHERE key = %s", (f"channel_{channel_id}",))
+            # 先检查是否已存在 - ⭐ 查询 value 而不是 id
+            cursor.execute(
+                "SELECT value FROM settings WHERE key = %s", 
+                (f"channel_{channel_id}",)
+            )
             if cursor.fetchone():
                 conn.close()
+                logger.warning(f"⚠️ 频道 {channel_id} 已添加过了")
                 return {
                     "success": False,
                     "msg": f"❌ 频道 {channel_id} 已添加过了"
                 }
             
+            # 插入新频道
             cursor.execute(
                 "INSERT INTO settings (key, value) VALUES (%s, %s)",
                 (f"channel_{channel_id}", channel_id)
             )
         else:
+            # SQLite 查询 - ⭐ 查询 value 而不是 id
             cursor.execute(
-                "SELECT id FROM settings WHERE key = ?", (f"channel_{channel_id}",)
+                "SELECT value FROM settings WHERE key = ?", 
+                (f"channel_{channel_id}",)
             )
             if cursor.fetchone():
                 conn.close()
+                logger.warning(f"⚠️ 频道 {channel_id} 已添加过了")
                 return {
                     "success": False,
                     "msg": f"❌ 频道 {channel_id} 已添加过了"
@@ -346,15 +360,18 @@ def get_all_required_channels() -> list:
         cursor = conn.cursor()
         
         if USE_POSTGRES:
-            cursor.execute("SELECT value FROM settings WHERE key LIKE 'channel_%'")
+            # ⭐ PostgreSQL LIKE 查询需要用 %s
+            cursor.execute("SELECT value FROM settings WHERE key LIKE %s", ('channel_%',))
         else:
-            cursor.execute("SELECT value FROM settings WHERE key LIKE 'channel_%'")
+            # ⭐ SQLite LIKE 查询
+            cursor.execute("SELECT value FROM settings WHERE key LIKE ?", ('channel_%',))
         
         results = cursor.fetchall()
         conn.close()
         
+        # 提取第一列数据
         channels = [r[0] for r in results] if results else []
-        logger.info(f"📋 获取到 {len(channels)} 个频道")
+        logger.info(f"📋 获取到 {len(channels)} 个频道: {channels}")
         return channels
     except Exception as e:
         logger.error(f"获取频道列表失败: {e}")
@@ -368,9 +385,15 @@ def remove_required_channel(channel_id: str) -> dict:
         cursor = conn.cursor()
         
         if USE_POSTGRES:
-            cursor.execute("DELETE FROM settings WHERE key = %s", (f"channel_{channel_id}",))
+            cursor.execute(
+                "DELETE FROM settings WHERE key = %s", 
+                (f"channel_{channel_id}",)
+            )
         else:
-            cursor.execute("DELETE FROM settings WHERE key = ?", (f"channel_{channel_id}",))
+            cursor.execute(
+                "DELETE FROM settings WHERE key = ?", 
+                (f"channel_{channel_id}",)
+            )
         
         conn.commit()
         conn.close()
@@ -427,7 +450,7 @@ def get_start_message(default: str = "") -> str:
         
         return result[0] if result else default
     except Exception as e:
-        logger.error(f"��取欢迎语失败: {e}")
+        logger.error(f"获取欢迎语失败: {e}")
         return default
 
 
