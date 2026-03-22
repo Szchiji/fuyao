@@ -1,10 +1,15 @@
 # bot_instance.py
-"""全局 Bot 实例 - 用于避免循环导入"""
+"""
+全局 Bot 实例
+避免循环导入问题
+"""
 
-import asyncio
+import logging
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from config import TELEGRAM_BOT_TOKEN
+
+logger = logging.getLogger(__name__)
 
 # 创建全局 Bot 实例
 bot = Bot(
@@ -14,6 +19,7 @@ bot = Bot(
 
 # 存储频道邀请链接的缓存
 _channel_invite_cache = {}
+
 
 async def get_channel_invite_link(channel_id: str) -> str:
     """
@@ -39,47 +45,23 @@ async def get_channel_invite_link(channel_id: str) -> str:
         if channel.username:
             link = f"https://t.me/{channel.username}"
             _channel_invite_cache[channel_id] = link
+            logger.info(f"✅ 获取公开频道链接: {channel.username}")
             return link
         
         # 如果是私密频道，创建邀请链接
         try:
             invite_link = await bot.create_chat_invite_link(
                 channel_id,
-                creates_join_request=False  # 直接加入，不需要请求
+                creates_join_request=False
             )
             link = invite_link.invite_link
             _channel_invite_cache[channel_id] = link
+            logger.info(f"✅ 创建私密频道邀请链接成功")
             return link
         except Exception as e:
-            print(f"创建邀请链接失败: {e}")
-            # 如果创建失败，尝试获取现有的邀请链接
-            try:
-                invite_links = await bot.get_chat_administrators(channel_id)
-                # 这个方法不适用，尝试另一个方法
-                raise e
-            except:
-                return ""
+            logger.warning(f"⚠️ 创建邀请链接失败: {e}")
+            return ""
     
     except Exception as e:
-        print(f"获取频道邀请链接失败: {e}")
+        logger.error(f"❌ 获取频道邀请链接失败: {e}")
         return ""
-
-
-async def update_channel_link(channel_id: str) -> str:
-    """
-    更新频道邀请链接缓存
-    
-    Args:
-        channel_id: 频道ID
-    
-    Returns:
-        邀请链接
-    """
-    global _channel_invite_cache
-    
-    # 清除旧缓存
-    if channel_id in _channel_invite_cache:
-        del _channel_invite_cache[channel_id]
-    
-    # 获取新的邀请链接
-    return await get_channel_invite_link(channel_id)
