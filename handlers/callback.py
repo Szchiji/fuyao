@@ -223,7 +223,7 @@ A: 可以用别账号""")
             from handlers.private import cmd_start
             await cmd_start(callback.message)
             return
-            
+        
         if data == "check_all_subscriptions":
             channels = get_all_required_channels()
             user_id = callback.from_user.id
@@ -243,6 +243,256 @@ A: 可以用别账号""")
                 await callback.answer("✅ 验证成功！")
                 from handlers.private import cmd_start
                 await cmd_start(callback.message)
+            return
+        
+        # ==================== 跳转私聊用户 ====================
+        if data.startswith("jump_user|"):
+            parts = data.split("|")
+            if len(parts) >= 2:
+                try:
+                    user_id = int(parts[1])
+                    teacher_name = parts[2] if len(parts) > 2 else "未知教师"
+                    rating_id = parts[3] if len(parts) > 3 else "未知"
+                    
+                    # 显示用户信息
+                    try:
+                        user_chat = await bot.get_chat(user_id)
+                        username = user_chat.username or "无"
+                        first_name = user_chat.first_name or "用户"
+                        
+                        info_text = f"""👤 用户信息
+
+名字: {first_name}
+用户名: @{username}
+ID: <code>{user_id}</code>
+教师: @{teacher_name}
+评价ID: {rating_id}
+
+🔗 跳转方式：
+• 点击下方按钮私聊用户
+• 或复制 ID 后手动发送"""
+                        
+                        # 创建私聊按钮
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(
+                                text="💬 私聊用户",
+                                url=f"https://t.me/user?id={user_id}"
+                            )],
+                            [InlineKeyboardButton(
+                                text="🔙 返回列表",
+                                callback_data=f"back_to_ratings|{teacher_name}"
+                            )]
+                        ])
+                        
+                        await callback.answer()
+                        await bot.send_message(
+                            callback.from_user.id,
+                            info_text,
+                            reply_markup=kb
+                        )
+                        
+                        logger.info(f"✅ 管理员 {callback.from_user.id} 跳转到用户 {user_id}")
+                    
+                    except Exception as e:
+                        logger.error(f"获取用户信息失败: {e}")
+                        await callback.answer("❌ 获取用户信息失败", show_alert=True)
+                
+                except ValueError:
+                    await callback.answer("❌ 用户ID格式错误", show_alert=True)
+            return
+        
+        # ==================== 删除单条评价 ====================
+        if data.startswith("delete_rating|"):
+            parts = data.split("|")
+            if len(parts) >= 3:
+                teacher_name = parts[1]
+                rating_id = parts[2]
+                
+                # 确认删除
+                confirm_text = f"""⚠️ 确认删除评价
+
+教师: @{teacher_name}
+评价ID: {rating_id}
+
+此操作不可恢复！
+
+点击下方按钮确认删除"""
+                
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="✅ 确认删除",
+                        callback_data=f"confirm_delete_rating|{teacher_name}|{rating_id}"
+                    )],
+                    [InlineKeyboardButton(
+                        text="❌ 取消",
+                        callback_data=f"cancel_delete"
+                    )]
+                ])
+                
+                await callback.answer()
+                await bot.send_message(
+                    callback.from_user.id,
+                    confirm_text,
+                    reply_markup=kb
+                )
+                
+                logger.info(f"⚠️ 管理员 {callback.from_user.id} 请求删除评价 {rating_id}")
+            return
+        
+        # ==================== 确认删除单条评价 ====================
+        if data.startswith("confirm_delete_rating|"):
+            parts = data.split("|")
+            if len(parts) >= 3:
+                teacher_name = parts[1]
+                rating_id = parts[2]
+                
+                from database import delete_rating_by_id
+                result = delete_rating_by_id(rating_id, teacher_name)
+                
+                await callback.answer()
+                await bot.send_message(
+                    callback.from_user.id,
+                    result["msg"]
+                )
+                
+                if result["success"]:
+                    logger.warning(f"🗑️ 管理员 {callback.from_user.id} 删除了评价 {rating_id}")
+            return
+        
+        # ==================== 删除教师全部数据 ====================
+        if data.startswith("delete_all_teacher|"):
+            teacher_name = data.split("|")[1]
+            
+            from database import get_teacher_stats
+            stats = get_teacher_stats(teacher_name)
+            
+            confirm_text = f"""⚠️ 确认删除教师全部数据
+
+教师: @{teacher_name}
+总评价数: {stats['total']}
+👍 推荐: {stats['recommend']}
+👎 不推荐: {stats['not_recommend']}
+
+⚠️ 此操作不可恢复！
+
+点击下方按钮确认删除"""
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="✅ 确认删除",
+                    callback_data=f"confirm_delete_teacher|{teacher_name}"
+                )],
+                [InlineKeyboardButton(
+                    text="❌ 取消",
+                    callback_data=f"cancel_delete"
+                )]
+            ])
+            
+            await callback.answer()
+            await bot.send_message(
+                callback.from_user.id,
+                confirm_text,
+                reply_markup=kb
+            )
+            
+            logger.info(f"⚠️ 管理员 {callback.from_user.id} 请求删除教师 @{teacher_name} 的全部数据")
+            return
+        
+        # ==================== 确认删除教师全部数据 ====================
+        if data.startswith("confirm_delete_teacher|"):
+            teacher_name = data.split("|")[1]
+            
+            from database import delete_teacher_data_from_db
+            result = delete_teacher_data_from_db(teacher_name)
+            
+            await callback.answer()
+            await bot.send_message(
+                callback.from_user.id,
+                result["msg"]
+            )
+            
+            if result["success"]:
+                logger.warning(f"🗑️ 管理员 {callback.from_user.id} 删除了教师 @{teacher_name} 的全部数据")
+            return
+        
+        # ==================== 返回评价列表 ====================
+        if data.startswith("back_to_ratings|"):
+            teacher_name = data.split("|")[1]
+            
+            await callback.answer()
+            
+            # 重新调用查看评价的逻辑
+            from database import get_teacher_all_ratings
+            
+            ratings = get_teacher_all_ratings(teacher_name)
+            
+            if not ratings:
+                await bot.send_message(
+                    callback.from_user.id,
+                    f"❌ 教师 @{teacher_name} 没有任何评价"
+                )
+                return
+            
+            text = f"""📝 教师 @{teacher_name} 的所有评价 ({len(ratings)} 条)
+
+"""
+            
+            kb_buttons = []
+            
+            for i, rating in enumerate(ratings[:10], 1):
+                rating_id = rating[0]
+                user_id = rating[1]
+                recommend = rating[2]
+                reason = rating[3]
+                time = rating[4]
+                
+                emoji = "👍" if recommend else "👎"
+                text += f"""{i}. {emoji} 用户 ID: {user_id}
+   理由: {reason[:50]}...
+   时间: {time}
+
+"""
+                
+                btn_text = f"{emoji} 用户 {user_id}"
+                kb_buttons.append([
+                    InlineKeyboardButton(
+                        text=btn_text,
+                        callback_data=f"jump_user|{user_id}|{teacher_name}|{rating_id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="🗑️ 删",
+                        callback_data=f"delete_rating|{teacher_name}|{rating_id}"
+                    )
+                ])
+            
+            if len(ratings) > 10:
+                text += f"\n... 还有 {len(ratings) - 10} 条评价"
+            
+            kb_buttons.append([
+                InlineKeyboardButton(
+                    text="🗑️ 删除该教师全部数据",
+                    callback_data=f"delete_all_teacher|{teacher_name}"
+                )
+            ])
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+            
+            await bot.send_message(
+                callback.from_user.id,
+                text,
+                reply_markup=kb
+            )
+            
+            logger.info(f"✅ 返回教师 @{teacher_name} 的评价列表")
+            return
+        
+        # ==================== 取消删除 ====================
+        if data == "cancel_delete":
+            await callback.answer()
+            await bot.send_message(
+                callback.from_user.id,
+                "✅ 删除已取消"
+            )
             return
 
     except Exception as e:
