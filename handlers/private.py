@@ -7,7 +7,7 @@
 import logging
 import re
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from database import (
@@ -269,12 +269,16 @@ async def get_my_id(message: Message):
 
 # ==================== 处理 @teacher_name 提及 ====================
 
-@router.message()
+@router.message(StateFilter(None))
 async def handle_teacher_mention(message: Message, state: FSMContext):
     """
     处理 @teacher_name 提及
     支持群组和私聊
     """
+    # 忽略没有文本的消息（图片、贴纸等）
+    if not message.text:
+        return
+    
     # 忽略命令
     if message.text.startswith("/"):
         return
@@ -312,15 +316,18 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
 
 📈 总评价数: {stats['total']}"""
             
+            # latest 字段顺序: id(0), user_id(1), recommend(2), reason(3), time(4)
             if stats["latest"]:
                 display_text += "\n\n📝 最新评价："
                 for i, review in enumerate(stats["latest"][:2], 1):
-                    rec_emoji = "👍" if review[1] else "👎"
-                    display_text += f"\n{i}. {rec_emoji} {review[2][:40]}..."
+                    rec_emoji = "👍" if review[2] else "👎"
+                    display_text += f"\n{i}. {rec_emoji} [#{review[0]}] {review[3][:40]}..."
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}")],
-            [InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")]
+            [
+                InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
+                InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
+            ]
         ])
         
         await message.reply(display_text, reply_markup=kb)

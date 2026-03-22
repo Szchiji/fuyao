@@ -6,6 +6,7 @@
 import logging
 import re
 from aiogram import Router
+from aiogram.filters import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from database import get_teacher_stats
@@ -15,13 +16,17 @@ from bot_instance import bot
 logger = logging.getLogger(__name__)
 router = Router()
 
-@router.message()
+@router.message(StateFilter(None))
 async def handle_teacher_mention(message: Message, state: FSMContext):
     """
     在群组中处理 @teacher_name 提及
     """
     # 只处理群组消息
     if message.chat.type == "private":
+        return
+    
+    # 忽略没有文本的消息（图片、贴纸等）
+    if not message.text:
         return
     
     # 只处理包含 @ 符号的消息
@@ -60,19 +65,22 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
 
 📈 总评价数: {stats['total']}"""
             
-            # 显示最新评价
+            # 显示最新评价（含 ID）
+            # latest 字段顺序: id(0), user_id(1), recommend(2), reason(3), time(4)
             if stats["latest"]:
                 display_text += "\n\n📝 最新评价："
                 for i, review in enumerate(stats["latest"][:2], 1):
-                    rec_emoji = "👍" if review[1] else "👎"
-                    display_text += f"\n{i}. {rec_emoji} {review[2][:30]}..."
+                    rec_emoji = "👍" if review[2] else "👎"
+                    display_text += f"\n{i}. {rec_emoji} [#{review[0]}] {review[3][:30]}..."
         
         # 创建评价按钮
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}")],
-            [InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")]
+            [
+                InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
+                InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
+            ]
         ])
         
         await message.reply(display_text, reply_markup=kb)
