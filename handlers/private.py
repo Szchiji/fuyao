@@ -298,6 +298,13 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     if message.text.startswith("/"):
         return
     
+    # 处理群组中发送的"排行榜"关键词
+    if message.chat.type != "private" and "排行榜" in message.text:
+        leaderboard = get_leaderboard(10)
+        text = format_leaderboard_text(leaderboard)
+        await message.reply(text)
+        return
+
     # 只处理包含 @ 符号的消息
     if "@" not in message.text:
         return

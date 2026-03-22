@@ -93,8 +93,10 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 
         if data == "show_help":
             await callback.answer()
-            await bot.send_message(
-                callback.from_user.id,
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+            ])
+            await callback.message.edit_text(
                 """📖 快速帮助
 
 ⭐ 使用步骤：
@@ -107,13 +109,17 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 "讲课很生动，逻辑清晰，认真负责，强烈推荐"
 
 💡 更多帮助:
-/帮助"""
+/帮助""",
+                reply_markup=kb
             )
             return
 
         if data == "how_to_rate":
             await callback.answer()
-            await bot.send_message(callback.from_user.id, """⭐ 如何评价教师
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+            ])
+            await callback.message.edit_text("""⭐ 如何评价教师
 
 步骤 1️⃣：输入教师名称
 在群组中输入: @李老师
@@ -138,12 +144,15 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 💡 小贴士：
 • 一个教师只能评价一次
 • 评价要真实客观
-• 具体说明优缺点""")
+• 具体说明优缺点""", reply_markup=kb)
             return
 
         if data == "faq":
             await callback.answer()
-            await bot.send_message(callback.from_user.id, """❓ 常见问题
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+            ])
+            await callback.message.edit_text("""❓ 常见问题
 
 Q: 如何查询教师评价？
 A: 输入 @teacher_name
@@ -164,7 +173,7 @@ Q: 如何举报不当评价？
 A: 联系管理员
 
 Q: 可以匿名评价吗？
-A: 可以用别账号""")
+A: 可以用别账号""", reply_markup=kb)
             return
 
         if data == "contact_admin":
@@ -235,7 +244,7 @@ A: 可以用别账号""")
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
             ])
-            await bot.send_message(callback.from_user.id, text, reply_markup=kb)
+            await callback.message.edit_text(text, reply_markup=kb)
             return
 
         if data == "retry_verify":
@@ -246,8 +255,26 @@ A: 可以用别账号""")
 
         if data == "back_to_start":
             await callback.answer()
-            from handlers.private import cmd_start
-            await cmd_start(callback.message)
+            from database import get_start_message
+            welcome = get_start_message(
+                """👋 欢迎使用狼评机器人！🎓
+
+这是一个教师评价平台，帮助同学们了解教师的教学情况。
+
+📝 使用方法:
+在群组中输入 @teacher_name 来查询或评价教师
+
+例如: @李老师、@王教授、@张老师
+
+💡 更多帮助请输入 /帮助"""
+            )
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📖 查看帮助", callback_data="show_help")],
+                [InlineKeyboardButton(text="⭐ 如何评价", callback_data="how_to_rate")],
+                [InlineKeyboardButton(text="🏆 教师排行榜", callback_data="show_leaderboard")],
+                [InlineKeyboardButton(text="❓ 常见问题", callback_data="faq")]
+            ])
+            await callback.message.edit_text(welcome, reply_markup=kb)
             return
 
         if data == "check_all_subscriptions":
