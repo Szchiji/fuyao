@@ -1,21 +1,82 @@
 # handlers/group.py
-from aiogram import Router, F
-from aiogram.types import Message
-from database import get_teacher_detail
-from utils.helpers import send_teacher_detail
+"""
+群组处理模块
+"""
 
+import logging
+import re
+from aiogram import Router
+from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from database import get_teacher_stats
+from states import RatingStates
+from bot_instance import bot
+
+logger = logging.getLogger(__name__)
 router = Router()
 
-@router.message(F.text.regexp(r'@([a-zA-Z0-9_]{5,32})'))
-async def handle_at_query(message: Message):
-    """处理 @username 查询"""
+@router.message()
+async def handle_teacher_mention(message: Message, state: FSMContext):
+    """
+    在群组中处理 @teacher_name 提及
+    """
+    # 只处理群组消息
+    if message.chat.type == "private":
+        return
+    
+    # 只处理包含 @ 符号的消息
+    if "@" not in message.text:
+        return
+    
+    # 使用正则表达式提取 @username
+    pattern = r'@([a-zA-Z0-9_]+)'
+    matches = re.findall(pattern, message.text)
+    
+    if not matches:
+        return
+    
+    # 取第一个匹配的教师名称
+    teacher_name = matches[0]
+    
+    logger.info(f"用户 {message.from_user.id} 在群组中查询教师 @{teacher_name}")
+    
     try:
-        # 提取用户名
-        parts = message.text.split()
-        for part in parts:
-            if part.startswith('@'):
-                teacher = part[1:].strip()
-                await send_teacher_detail(message, teacher)
-                return
+        # 获取教师统计
+        stats = get_teacher_stats(teacher_name)
+        
+        if stats["total"] == 0:
+            # 暂无评价
+            display_text = f"""【@{teacher_name}】
+暂无评价记录
+快来成为第一个评价的人吧！"""
+        else:
+            # 显示现有评价
+            recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
+            
+            display_text = f"""【@{teacher_name}】
+📊 评价统计：
+👍 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
+👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
+
+📈 总评价数: {stats['total']}"""
+            
+            # 显示最新评价
+            if stats["latest"]:
+                display_text += "\n\n📝 最新评价："
+                for i, review in enumerate(stats["latest"][:2], 1):
+                    rec_emoji = "👍" if review[1] else "👎"
+                    display_text += f"\n{i}. {rec_emoji} {review[2][:30]}..."
+        
+        # 创建评价按钮
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}")],
+            [InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")]
+        ])
+        
+        await message.reply(display_text, reply_markup=kb)
+        
     except Exception as e:
-        print(f"处理查询时出错: {e}")
+        logger.error(f"处理教师提及时出错: {e}")
+        await message.reply(f"❌ 出错: {str(e)}")
