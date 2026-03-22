@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
-from config import TELEGRAM_BOT_TOKEN
+from config import TELEGRAM_BOT_TOKEN, ADMIN_IDS
 from database import init_db
 
 logger = logging.getLogger(__name__)
@@ -20,15 +20,34 @@ logging.basicConfig(
 )
 
 logger.info("🚀 启动狼评机器人...")
+logger.info(f"📝 配置的管理员 ID: {ADMIN_IDS}")
+
+try:
+    from handlers.admin import router as admin_router
+    logger.info("✅ admin_router 已加载")
+except Exception as e:
+    logger.error(f"❌ 加载 admin_router 失败: {e}")
+    sys.exit(1)
+
+try:
+    from handlers.rating import router as rating_router
+    logger.info("✅ rating_router 已加载")
+except Exception as e:
+    logger.error(f"❌ 加载 rating_router 失败: {e}")
+    sys.exit(1)
+
+try:
+    from handlers.callback import router as callback_router
+    logger.info("✅ callback_router 已加载")
+except Exception as e:
+    logger.error(f"❌ 加载 callback_router 失败: {e}")
+    sys.exit(1)
 
 try:
     from handlers.private import router as private_router
-    from handlers.admin import router as admin_router
-    from handlers.callback import router as callback_router
-    from handlers.rating import router as rating_router
-    logger.info("✅ 所有处理器已加载")
+    logger.info("✅ private_router 已加载")
 except Exception as e:
-    logger.error(f"❌ 加载处理器失败: {e}")
+    logger.error(f"❌ 加载 private_router 失败: {e}")
     sys.exit(1)
 
 try:
@@ -53,20 +72,25 @@ async def main():
     # 创建 Dispatcher
     dp = Dispatcher(storage=storage)
     
-    # 注册所有路由器
-    logger.info("📋 开始注册路由器...")
+    # ⭐ 重要：注册路由器的顺序很重要！
+    # 管理员路由器要放在前面，因为它的命令更具体
+    logger.info("📋 注册路由器...")
     
-    dp.include_router(private_router)
-    logger.info("✅ private_router 已注册")
+    # 1. 先注册管理员路由器（具体命令）
+    dp.include_router(admin_router)
+    logger.info("✅ admin_router 已注册")
     
-    dp.include_router(callback_router)
-    logger.info("✅ callback_router 已注册")
-    
+    # 2. 再注册评价路由器（状态机）
     dp.include_router(rating_router)
     logger.info("✅ rating_router 已注册")
     
-    dp.include_router(admin_router)
-    logger.info("✅ admin_router 已注册")
+    # 3. 再注册回调路由器
+    dp.include_router(callback_router)
+    logger.info("✅ callback_router 已注册")
+    
+    # 4. 最后注册私聊路由器（通用消息处理）
+    dp.include_router(private_router)
+    logger.info("✅ private_router 已注册")
     
     logger.info("✅ 狼评机器人已启动")
     logger.info("🔄 开始轮询更新...")
