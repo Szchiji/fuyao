@@ -44,7 +44,7 @@ try:
     from handlers.callback import router as callback_router
     logger.info("✅ callback_router 已加载")
 except Exception as e:
-    logger.error(f"❌ ��载 callback_router 失败: {e}")
+    logger.error(f"❌ 加载 callback_router 失败: {e}")
     exit(1)
 
 try:
@@ -156,8 +156,9 @@ async def main():
     # ==================== 创建 Web 应用 ====================
     app = web.Application()
     
+    # ⭐ 修复：使用正确的 aiohttp API
     # 添加 Webhook 路由
-    app.router.post('/webhook', webhook_handler)
+    app.router.add_post('/webhook', webhook_handler)
     
     # 添加健康检查路由
     async def health_check(request):
@@ -167,7 +168,7 @@ async def main():
             content_type='application/json'
         )
     
-    app.router.get('/health', health_check)
+    app.router.add_get('/health', health_check)
     
     # 添加信息端点
     async def info_handler(request):
@@ -182,7 +183,7 @@ async def main():
         }
         return web.json_response(info)
     
-    app.router.get('/info', info_handler)
+    app.router.add_get('/info', info_handler)
     
     # ==================== 启动 Web 服务器 ====================
     logger.info(f"🌐 启动 Web 服务器（监听 0.0.0.0:{PORT}）...")
@@ -284,7 +285,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("⛔ 机器人停止")
+        logger.info("⛔ 机器人���止")
     except Exception as e:
         logger.error(f"❌ 致命错误: {e}", exc_info=True)
         exit(1)
