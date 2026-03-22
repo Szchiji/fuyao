@@ -8,9 +8,8 @@ import logging
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from config import CHANNEL_LINK
 from database import get_start_message, get_required_channel
-from bot_instance import bot
+from bot_instance import bot, get_channel_invite_link
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -36,11 +35,19 @@ async def cmd_start(message: Message):
             if member.status in ('left', 'kicked', 'restricted'):
                 logger.warning(f"用户 {user_id} 未订阅频道 {required}")
                 
+                # 自动获取邀请链接
+                channel_link = await get_channel_invite_link(required)
+                
+                if not channel_link:
+                    logger.error(f"无法获取频道 {required} 的邀请链接")
+                    await message.reply("❌ 系统错误，无法生成邀请链接\n请联系管理员")
+                    return
+                
                 # 创建多个按钮
                 kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
-                        text="📢 加入频道",
-                        url=CHANNEL_LINK
+                        text="📢 点击加入频道",
+                        url=channel_link
                     )],
                     [InlineKeyboardButton(
                         text="❓ 频道介绍",
@@ -64,11 +71,14 @@ async def cmd_start(message: Message):
         except Exception as e:
             logger.error(f"检查频道成员时出错: {e}")
             
+            # 自动获取邀请链接
+            channel_link = await get_channel_invite_link(required)
+            
             # 如果检查失败，拒绝访问
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text="📢 加入频道",
-                    url=CHANNEL_LINK
+                    text="📢 点击加入频道",
+                    url=channel_link if channel_link else "https://t.me"
                 )],
                 [InlineKeyboardButton(
                     text="🔄 重新验证",
