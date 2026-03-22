@@ -13,7 +13,12 @@ from database import (
     get_all_required_channels,
     set_start_message,
     get_global_stats,
-    get_connection
+    get_connection,
+    get_teacher_stats,
+    delete_teacher_data_from_db,
+    delete_user_rating,
+    get_teacher_all_ratings,
+    delete_rating_by_id
 )
 from utils.decorators import admin_only
 from bot_instance import bot
@@ -61,7 +66,12 @@ async def admin_menu(message: Message):
 • /诊断频道 - 诊断频道
 • /设置欢迎语 [内容] - 设置欢迎语
 • /统计 - 详细统计
-• /数据库 - 数据库信息"""
+• /数据库 - 数据库信息
+
+👨‍🏫 教师管理：
+• /管理教师 [教师名] - 管理教师数据
+• /查看评价 [教师名] - 查看所有评价
+• /删除教师数据 [教师名] - 删除教师所有数据"""
     
     await message.reply(menu_text)
 
@@ -297,7 +307,7 @@ async def show_db(message: Message):
 • 总评价: {total}
 • 教师数: {teachers}
 • 👍 推荐: {rec}
-• 👎 不推荐: {not_rec}
+• �� 不推荐: {not_rec}
 
 💾 数据库状态: ✅ 正常"""
         
@@ -330,6 +340,14 @@ async def admin_help(message: Message):
 ✏️ 内容管理：
 • /设置欢迎语 [欢迎语] - 设置欢迎语
 
+👨‍🏫 教师管理：
+• /管理教师 [教师名] - 管理教师数据
+• /查看评价 [教师名] - 查看所有评价
+• /删除教师数据 [教师名] - 删除教师所有数据
+• /确认删除 [教师名] - 确认删除
+• /删除评价 [教师名] [评价ID] - 删除单条评价
+• /取消 - 取消操作
+
 ❓ 其他：
 • /管理帮助 - 显示此帮助
 
@@ -341,14 +359,243 @@ async def admin_help(message: Message):
 2. 查看所有频道:
    /频道列表
 
-3. 测试频道:
-   /测试频道
+3. 管理教师:
+   /管理教师 李老师
 
-4. 删除频道:
-   /删除频道 -1001811864163
+4. 查看评价:
+   /查看评价 李老师
 
-5. 设置欢迎语:
+5. 删除教师数据:
+   /删除教师数据 李老师
+   /确认删除 李老师
+
+6. 设置欢迎语:
    /设置欢迎语 欢迎使用狼评机器人！"""
     
     await message.reply(help_text)
     logger.info(f"✅ 管理员 {message.from_user.id} 查看管理帮助")
+
+
+# ==================== /管理教师 命令 ====================
+@router.message(Command("管理教师"))
+@admin_only
+async def manage_teacher(message: Message):
+    """管理教师数据"""
+    try:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            raise IndexError
+        
+        teacher_name = parts[1].strip()
+        
+        # 获取教师统计
+        stats = get_teacher_stats(teacher_name)
+        
+        if stats["total"] == 0:
+            await message.reply(f"""❌ 教师 @{teacher_name} 没有任何评价
+
+无法进行管理操作""")
+            return
+        
+        # 显示管理界面
+        recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
+        
+        manage_text = f"""👨‍🏫 教师数据管理
+
+教师: @{teacher_name}
+
+📊 统计信息:
+• 总评价数: {stats['total']}
+• �� 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
+• 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
+
+⚙️ 管理操作:
+• /查看评价 {teacher_name} - 查看所有评价
+• /删除教师数据 {teacher_name} - 删除该教师数据
+
+⚠️ 注意: 删除操作不可恢复"""
+        
+        await message.reply(manage_text)
+        logger.info(f"✅ 管理员 {message.from_user.id} 访问教师管理: @{teacher_name}")
+        
+    except IndexError:
+        await message.reply("""❌ 用法错误
+
+正确用法:
+/管理教师 李老师""")
+
+
+# ==================== /查看评价 命令 ====================
+@router.message(Command("查看评价"))
+@admin_only
+async def view_teacher_ratings(message: Message):
+    """查看某个教师的所有评价"""
+    try:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            raise IndexError
+        
+        teacher_name = parts[1].strip()
+        
+        # 获取所有评价
+        ratings = get_teacher_all_ratings(teacher_name)
+        
+        if not ratings:
+            await message.reply(f"""❌ 教师 @{teacher_name} 没有任何评价""")
+            return
+        
+        # 构建评价列表
+        text = f"""📝 教师 @{teacher_name} 的所有评价 ({len(ratings)} 条)
+
+"""
+        
+        for i, rating in enumerate(ratings[:10], 1):
+            rating_id = rating[0]
+            user_id = rating[1]
+            recommend = rating[2]
+            reason = rating[3]
+            time = rating[4]
+            
+            emoji = "👍" if recommend else "👎"
+            text += f"""{i}. {emoji} 用户 {user_id}
+   理由: {reason[:50]}...
+   时间: {time}
+   删除: /删除评价 {teacher_name} {rating_id}
+
+"""
+        
+        if len(ratings) > 10:
+            text += f"\n... 还有 {len(ratings) - 10} 条评价"
+        
+        await message.reply(text)
+        logger.info(f"✅ 管理员 {message.from_user.id} 查看教师 @{teacher_name} 的评价")
+        
+    except IndexError:
+        await message.reply("""❌ 用法错误
+
+正确用法:
+/查看评价 李老师""")
+
+
+# ==================== /删除教师数据 命令 ====================
+@router.message(Command("删除教师数据"))
+@admin_only
+async def delete_teacher_data(message: Message):
+    """删除某个教师的所有评价数据"""
+    try:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            raise IndexError
+        
+        teacher_name = parts[1].strip()
+        
+        if not teacher_name:
+            await message.reply("""❌ 用法错误
+
+正确用法:
+/删除教师数据 李老师
+
+说明:
+• 删除该教师的所有评价数据
+• 操作不可恢复，请谨慎操作
+• 删除前会提示确认""")
+            return
+        
+        # 获取该教师的评价数
+        stats = get_teacher_stats(teacher_name)
+        
+        if stats["total"] == 0:
+            await message.reply(f"""❌ 教师 @{teacher_name} 没有任何评价数据
+
+无需删除""")
+            return
+        
+        # 显示确认信息并询问
+        confirm_text = f"""⚠️ 确认删除教师数据
+
+教师: @{teacher_name}
+总评价数: {stats['total']}
+👍 推荐: {stats['recommend']}
+👎 不推荐: {stats['not_recommend']}
+
+⚠️ 此操作不可恢复！
+
+请在下方输入确认命令:
+/确认删除 {teacher_name}
+
+或者输入 /取消 取消删除"""
+        
+        await message.reply(confirm_text)
+        
+        logger.info(f"⚠️ 管理员 {message.from_user.id} 请求删除教师 @{teacher_name} 的数据")
+        
+    except IndexError:
+        await message.reply("""❌ 用法错误
+
+正确用法:
+/删除教师数据 李老师""")
+
+
+# ==================== /确认删除 命令 ====================
+@router.message(Command("确认删除"))
+@admin_only
+async def confirm_delete_teacher(message: Message):
+    """确认删除教师数据"""
+    try:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            await message.reply("❌ 请指定要删除的教师名称\n\n/确认删除 李老师")
+            return
+        
+        teacher_name = parts[1].strip()
+        
+        # 删除数据
+        result = delete_teacher_data_from_db(teacher_name)
+        
+        if result["success"]:
+            await message.reply(result["msg"])
+            logger.warning(f"🗑️ 管理员 {message.from_user.id} 删除了教师 @{teacher_name} 的所有数据")
+        else:
+            await message.reply(result["msg"])
+            logger.error(f"❌ 删除教师数据失败: {result['msg']}")
+        
+    except Exception as e:
+        logger.error(f"删除教师数据出错: {e}")
+        await message.reply(f"❌ 删除失败: {str(e)}")
+
+
+# ==================== /删除评价 命令 ====================
+@router.message(Command("删除评价"))
+@admin_only
+async def delete_single_rating(message: Message):
+    """删除某条评价"""
+    try:
+        parts = message.text.split()
+        if len(parts) < 3:
+            raise IndexError
+        
+        teacher_name = parts[1]
+        rating_id = parts[2]
+        
+        # 删除评价
+        result = delete_rating_by_id(rating_id, teacher_name)
+        
+        await message.reply(result["msg"])
+        
+        if result["success"]:
+            logger.warning(f"🗑️ 管理员 {message.from_user.id} 删除了一条评价")
+        
+    except (IndexError, ValueError):
+        await message.reply("""❌ 用法错误
+
+正确用法:
+/删除评价 李老师 1""")
+
+
+# ==================== /取消 命令 ====================
+@router.message(Command("取消"))
+@admin_only
+async def cancel_operation(message: Message):
+    """取消操作"""
+    await message.reply("✅ 操作已取消")
+    logger.info(f"✅ 管理员 {message.from_user.id} 取消了操作")
