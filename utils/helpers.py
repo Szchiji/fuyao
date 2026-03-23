@@ -18,7 +18,7 @@ async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid:
         if getattr(tg_chat, "last_name", None):
             full_name = f"{full_name} {tg_chat.last_name}".strip()
         nickname = full_name or nickname
-        tid = str(tg_chat.id)
+        tid = str(tg_chat.id) if tg_chat.id else tid
     except Exception as e:
         logger.debug(f"从 Telegram 获取 @{teacher_name} 信息失败: {e}")
     return nickname, tid
