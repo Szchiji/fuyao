@@ -335,9 +335,9 @@ A: 可以用别账号""", reply_markup=kb)
                 kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
                 await callback.message.answer(
                     f"⚠️ 您需要加入以下频道才能使用机器人\n\n"
-                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"━━━━━━━━━━━━━\n"
                     f"📊 需要加入 {len(not_subscribed)} 个频道\n"
-                    f"━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"━━━━━━━━━━━━━\n\n"
                     f"🔗 请点击下方按钮加入，加入后点击验证",
                     reply_markup=kb
                 )
@@ -1321,9 +1321,9 @@ ID: <code>{user_id}</code>
 
             offset = page * per_page
             text = f"{header} 的评价\n\n"
-            text += f"━━━━━━━━━━━━━━━━━━━\n"
+            text += f"━━━━━━━━━━━━━\n"
             text += f"第 {offset + 1}–{min(offset + per_page, total)} 条 / 共 {total} 条\n"
-            text += f"━━━━━━━━━━━━━━━━━━━\n\n"
+            text += f"━━━━━━━━━━━━━\n\n"
 
             for i, review in enumerate(reviews, offset + 1):
                 rec_emoji = "👍" if review[2] else "👎"
