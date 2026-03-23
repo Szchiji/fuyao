@@ -102,6 +102,15 @@ def init_db():
                 )
             """)
             
+            # 黑名单表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS blacklist (
+                    user_id BIGINT PRIMARY KEY,
+                    reason TEXT DEFAULT '',
+                    banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             try:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
@@ -151,6 +160,15 @@ def init_db():
                 )
             """)
             
+            # 黑名单表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS blacklist (
+                    user_id INTEGER PRIMARY KEY,
+                    reason TEXT DEFAULT '',
+                    banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
@@ -974,3 +992,79 @@ def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
             "success": False,
             "msg": f"❌ 删除失败: {str(e)}"
         }
+
+# ==================== 黑名单管理 ====================
+
+def add_to_blacklist(user_id: int, reason: str = "") -> dict:
+    """将用户加入黑名单"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute(
+                """INSERT INTO blacklist (user_id, reason)
+                   VALUES (%s, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET reason = %s""",
+                (user_id, reason, reason)
+            )
+        else:
+            cursor.execute(
+                "INSERT OR REPLACE INTO blacklist (user_id, reason) VALUES (?, ?)",
+                (user_id, reason)
+            )
+        conn.commit()
+        conn.close()
+        logger.warning(f"🚫 用户 {user_id} 已被加入黑名单，原因：{reason}")
+        return {"success": True, "msg": f"✅ 用户 {user_id} 已被加入黑名单"}
+    except Exception as e:
+        logger.error(f"加入黑名单失败: {e}")
+        return {"success": False, "msg": f"❌ 操作失败: {str(e)}"}
+
+
+def remove_from_blacklist(user_id: int) -> dict:
+    """将用户从黑名单中移除"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute("DELETE FROM blacklist WHERE user_id = %s", (user_id,))
+        else:
+            cursor.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        logger.info(f"✅ 用户 {user_id} 已从黑名单中移除")
+        return {"success": True, "msg": f"✅ 用户 {user_id} 已从黑名单中移除"}
+    except Exception as e:
+        logger.error(f"移除黑名单失败: {e}")
+        return {"success": False, "msg": f"❌ 操作失败: {str(e)}"}
+
+
+def is_user_blacklisted(user_id: int) -> bool:
+    """检查用户是否在黑名单中"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute("SELECT user_id FROM blacklist WHERE user_id = %s", (user_id,))
+        else:
+            cursor.execute("SELECT user_id FROM blacklist WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return result is not None
+    except Exception as e:
+        logger.error(f"检查黑名单失败: {e}")
+        return False
+
+
+def get_all_blacklisted_users() -> list:
+    """获取所有黑名单用户"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, reason, banned_at FROM blacklist ORDER BY banned_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"user_id": r[0], "reason": r[1] or "", "banned_at": str(r[2])[:19] if r[2] else ""} for r in rows]
+    except Exception as e:
+        logger.error(f"获取黑名单失败: {e}")
+        return []

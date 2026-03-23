@@ -27,7 +27,11 @@ from database import (
     get_teacher_info,
     set_teacher_info,
     get_teacher_reviews_page,
-    record_user
+    record_user,
+    add_to_blacklist,
+    remove_from_blacklist,
+    is_user_blacklisted,
+    get_all_blacklisted_users
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
@@ -84,6 +88,13 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
                 return
 
             user_id = callback.from_user.id
+
+            if is_user_blacklisted(user_id):
+                await callback.answer(
+                    "🚫 您已被限制使用评价功能",
+                    show_alert=True
+                )
+                return
 
             if check_user_rated_teacher(teacher, user_id):
                 await callback.answer(
@@ -770,6 +781,11 @@ A: 可以用别账号""", reply_markup=kb)
 • /删除教师数据 [教师名] - 删除教师所有数据（含确认按钮）
 • /删除评价 [教师名] [评价ID] - 删除单条评价
 
+🚫 黑名单管理：
+• 点击菜单中的 🚫 黑名单管理 按钮
+• 拉黑恶意刷分用户，禁止其提交评价
+• 支持随时解除拉黑
+
 💡 交互式操作（推荐）：
 点击下方菜单按钮，所有操作均可通过按钮完成！"""
 
@@ -1299,6 +1315,137 @@ ID: <code>{user_id}</code>
             kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
             await callback.answer()
             await callback.message.edit_text(text, reply_markup=kb)
+            return
+
+        # ==================== 黑名单管理 ====================
+
+        if data == "admin_blacklist":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            blacklist = get_all_blacklisted_users()
+            count = len(blacklist)
+
+            if count == 0:
+                bl_summary = "（暂无黑名单用户）"
+            else:
+                lines = []
+                for entry in blacklist[:10]:
+                    reason_short = entry["reason"][:20] + "..." if len(entry["reason"]) > 20 else entry["reason"]
+                    reason_part = f" — {reason_short}" if reason_short else ""
+                    lines.append(f"• <code>{entry['user_id']}</code>{reason_part}")
+                bl_summary = "\n".join(lines)
+                if count > 10:
+                    bl_summary += f"\n…（共 {count} 人，仅显示前 10 条）"
+
+            text = f"""🚫 黑名单管理
+
+共有 {count} 名用户被拉黑：
+
+{bl_summary}
+
+黑名单用户无法提交评价。"""
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ 拉黑用户", callback_data="admin_add_blacklist")],
+                [InlineKeyboardButton(text="🔓 解除拉黑", callback_data="admin_remove_blacklist")],
+                [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+            ])
+            await callback.answer()
+            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            return
+
+        if data == "admin_add_blacklist":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await state.set_state(AdminStates.waiting_blacklist_user_id)
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
+            ])
+            await callback.answer()
+            await callback.message.edit_text(
+                """🚫 拉黑用户
+
+请发送要拉黑的用户 ID（纯数字）：
+
+💡 提示：
+• 可通过 /myid 获取用户的 ID
+• 被拉黑的用户将无法提交评价
+
+直接发送用户 ID 即可：""",
+                reply_markup=kb
+            )
+            return
+
+        if data == "admin_remove_blacklist":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            blacklist = get_all_blacklisted_users()
+            if not blacklist:
+                await callback.answer("❌ 黑名单为空", show_alert=True)
+                return
+
+            kb_rows = []
+            for entry in blacklist[:20]:
+                uid = entry["user_id"]
+                reason_short = entry["reason"][:15] + "…" if len(entry["reason"]) > 15 else entry["reason"]
+                label = f"🔓 {uid}" + (f" ({reason_short})" if reason_short else "")
+                kb_rows.append([InlineKeyboardButton(text=label, callback_data=f"confirm_remove_blacklist|{uid}")])
+            kb_rows.append([InlineKeyboardButton(text="🔙 返回", callback_data="admin_blacklist")])
+
+            await callback.answer()
+            await callback.message.edit_text(
+                f"🔓 选择要解除拉黑的用户（共 {len(blacklist)} 人）：",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+            )
+            return
+
+        if data.startswith("confirm_blacklist|"):
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            try:
+                target_user_id = int(data.split("|", 1)[1])
+            except (ValueError, IndexError):
+                await callback.answer("❌ 数据错误", show_alert=True)
+                return
+
+            result = add_to_blacklist(target_user_id)
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🚫 查看黑名单", callback_data="admin_blacklist")],
+                [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+            ])
+            await callback.answer(result["msg"][:200], show_alert=True)
+            await callback.message.edit_text(result["msg"], reply_markup=kb)
+            logger.warning(f"🚫 管理员 {callback.from_user.id} 拉黑了用户 {target_user_id}")
+            return
+
+        if data.startswith("confirm_remove_blacklist|"):
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            try:
+                target_user_id = int(data.split("|", 1)[1])
+            except (ValueError, IndexError):
+                await callback.answer("❌ 数据错误", show_alert=True)
+                return
+
+            result = remove_from_blacklist(target_user_id)
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🚫 查看黑名单", callback_data="admin_blacklist")],
+                [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+            ])
+            await callback.answer(result["msg"][:200], show_alert=True)
+            await callback.message.edit_text(result["msg"], reply_markup=kb)
+            logger.info(f"✅ 管理员 {callback.from_user.id} 解除拉黑了用户 {target_user_id}")
             return
 
     except Exception as e:
