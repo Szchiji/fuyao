@@ -9,7 +9,7 @@ from aiogram import Router
 from aiogram.filters import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
-from database import get_teacher_stats
+from database import get_teacher_stats, get_teacher_info
 from states import RatingStates
 from bot_instance import bot
 
@@ -46,19 +46,30 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     logger.info(f"用户 {message.from_user.id} 在群组中查询教师 @{teacher_name}")
     
     try:
-        # 获取教师统计
+        # 获取教师统计和信息
         stats = get_teacher_stats(teacher_name)
-        
+        teacher_info = get_teacher_info(teacher_name) or {}
+
+        nickname = teacher_info.get("nickname", "")
+        tid = teacher_info.get("teacher_id", "")
+
+        # 构建教师信息头部
+        header = f"👨‍🏫 @{teacher_name}"
+        if nickname:
+            header += f"\n📛 昵称：{nickname}"
+        if tid:
+            header += f"\n🆔 ID：{tid}"
+
         if stats["total"] == 0:
             # 暂无评价
-            display_text = f"""【@{teacher_name}】
+            display_text = f"""【{header}】
 暂无评价记录
 快来成为第一个评价的人吧！"""
         else:
             # 显示现有评价
             recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
             
-            display_text = f"""【@{teacher_name}】
+            display_text = f"""【{header}】
 📊 评价统计：
 👍 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
