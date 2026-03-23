@@ -23,7 +23,11 @@ from database import (
     delete_rating_by_id,
     get_all_user_ids,
     set_teacher_info,
-    get_teacher_info
+    get_teacher_info,
+    add_to_blacklist,
+    remove_from_blacklist,
+    get_all_blacklisted_users,
+    is_user_blacklisted
 )
 from utils.decorators import admin_only
 from bot_instance import bot
@@ -79,6 +83,9 @@ def build_admin_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📢 广播消息", callback_data="admin_broadcast"),
+            InlineKeyboardButton(text="🚫 黑名单管理", callback_data="admin_blacklist")
+        ],
+        [
             InlineKeyboardButton(text="📖 管理帮助", callback_data="admin_help")
         ]
     ])
@@ -998,3 +1005,52 @@ async def process_teacher_info_input(message: Message, state: FSMContext):
     )
     logger.info(f"✅ 管理员 {message.from_user.id} 设置教师 @{teacher_name} 昵称/ID")
 
+
+
+# ==================== FSM: 等待拉黑用户 ID 输入 ====================
+@router.message(StateFilter(AdminStates.waiting_blacklist_user_id))
+async def process_blacklist_user_id_input(message: Message, state: FSMContext):
+    """处理管理员输入的要拉黑的用户 ID"""
+    from config import ADMIN_IDS
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    raw = message.text.strip() if message.text else ""
+    await state.clear()
+
+    if not raw:
+        await message.reply("❌ 未收到有效内容，操作已取消")
+        return
+
+    try:
+        target_user_id = int(raw)
+    except ValueError:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 返回黑名单管理", callback_data="admin_blacklist")]
+        ])
+        await message.reply("❌ 用户 ID 格式错误，请输入纯数字", reply_markup=kb)
+        return
+
+    if is_user_blacklisted(target_user_id):
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔓 解除拉黑", callback_data=f"confirm_remove_blacklist|{target_user_id}")],
+            [InlineKeyboardButton(text="🔙 返回黑名单管理", callback_data="admin_blacklist")]
+        ])
+        await message.reply(
+            f"⚠️ 用户 <code>{target_user_id}</code> 已在黑名单中",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ 确认拉黑", callback_data=f"confirm_blacklist|{target_user_id}")],
+        [InlineKeyboardButton(text="❌ 取消", callback_data="admin_blacklist")]
+    ])
+    await message.reply(
+        f"🚫 确认将用户 <code>{target_user_id}</code> 加入黑名单？\n\n该用户将无法提交评价。",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    logger.info(f"管理员 {message.from_user.id} 请求拉黑用户 {target_user_id}")

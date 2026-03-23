@@ -14,7 +14,8 @@ from database import (
     add_evaluation,
     check_user_rated_teacher,
     MIN_REASON_LENGTH,
-    get_teacher_stats
+    get_teacher_stats,
+    is_user_blacklisted
 )
 from bot_instance import bot
 
@@ -38,7 +39,14 @@ async def process_rating_reason(message: Message, state: FSMContext):
     recommend = data.get("recommend")
     
     logger.info(f"📝 用户 {user_id} 提交评价，字数: {len(reason)}")
-    
+
+    # 检查用户是否在黑名单中
+    if is_user_blacklisted(user_id):
+        await state.clear()
+        await message.reply("🚫 您已被限制使用评价功能")
+        logger.warning(f"🚫 黑名单用户 {user_id} 尝试提交评价")
+        return
+
     if not teacher or recommend is None:
         logger.error("❌ 状态数据不完整")
         await message.reply("❌ 评价过程出错，请重新开始")
