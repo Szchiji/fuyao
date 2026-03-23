@@ -10,7 +10,7 @@ import sqlite3
 import logging
 import os
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 from config import MIN_REASON_LENGTH, DATABASE_URL, USE_POSTGRES
 
@@ -318,9 +318,11 @@ def get_global_stats() -> dict:
             cursor.execute("SELECT COUNT(DISTINCT teacher) FROM recs")
             total_teacher = cursor.fetchone()[0]
 
-            today = datetime.now().date()
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE DATE(time) = %s",
-                             "SELECT COUNT(*) FROM recs WHERE DATE(time) = ?"), (today,))
+            today = datetime.now(timezone(timedelta(hours=8))).date()
+            cursor.execute(q(
+                "SELECT COUNT(*) FROM recs WHERE DATE((time AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai') = %s",
+                "SELECT COUNT(*) FROM recs WHERE DATE(datetime(time, '+8 hours')) = ?"
+            ), (today,))
             today_count = cursor.fetchone()[0]
 
         return {"total_eval": total_eval, "total_teacher": total_teacher, "today": today_count}
