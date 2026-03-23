@@ -8,6 +8,7 @@ import logging
 from aiogram import Router
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from database import (
     check_user_rated_teacher,
     get_all_required_channels,
@@ -105,12 +106,21 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 
             logger.info(f"✅ 用户 {user_id} 选择了 {'推荐' if recommend else '不推荐'} @{teacher}")
 
-            await state.update_data(
+            # 在用户私聊上下文中设置状态，确保私聊中填写理由时能正确触发处理器
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(
+                    bot_id=callback.bot.id,
+                    chat_id=user_id,
+                    user_id=user_id
+                )
+            )
+            await private_state.update_data(
                 teacher=teacher,
                 recommend=recommend,
                 user_id=user_id
             )
-            await state.set_state(RatingStates.waiting_reason)
+            await private_state.set_state(RatingStates.waiting_reason)
 
             await callback.answer()
 
