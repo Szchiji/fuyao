@@ -26,7 +26,8 @@ from database import (
     get_all_user_ids,
     get_teacher_info,
     set_teacher_info,
-    get_teacher_reviews_page
+    get_teacher_reviews_page,
+    record_user
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
@@ -42,6 +43,23 @@ def _is_admin(user_id: int) -> bool:
     """检查用户是否为管理员"""
     from config import ADMIN_IDS
     return user_id in ADMIN_IDS
+
+
+async def _send_welcome(message):
+    """向指定消息对象发送欢迎语"""
+    from handlers.private import _build_welcome_keyboard
+    default_welcome = (
+        "👋 欢迎使用狼评机器人！🎓\n\n"
+        "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
+        "📝 使用方法：\n"
+        "在群组中输入 @teacher_name 来查询或评价教师\n\n"
+        "例如：@李老师、@王教授、@张老师\n\n"
+        "💡 更多帮助请输入 /帮助"
+    )
+    welcome = get_start_message(default_welcome)
+    start_buttons = get_start_buttons()
+    kb = _build_welcome_keyboard(start_buttons)
+    await message.answer(welcome, reply_markup=kb)
 
 
 @router.callback_query()
@@ -259,25 +277,63 @@ A: 可以用别账号""", reply_markup=kb)
 
         if data == "retry_verify":
             await callback.answer("正在重新验证...")
-            from handlers.private import cmd_start
-            await cmd_start(callback.message)
+            channels = get_all_required_channels()
+            user_id = callback.from_user.id
+
+            not_subscribed = []
+            for channel_id in channels:
+                try:
+                    member = await bot.get_chat_member(channel_id, user_id)
+                    if member.status in ('left', 'kicked', 'restricted'):
+                        not_subscribed.append(channel_id)
+                except Exception:
+                    not_subscribed.append(channel_id)
+
+            if not_subscribed:
+                kb_buttons = []
+                for channel_id in not_subscribed:
+                    try:
+                        channel = await bot.get_chat(channel_id)
+                        channel_link = await get_channel_invite_link(channel_id)
+                        if channel_link:
+                            kb_buttons.append([
+                                InlineKeyboardButton(
+                                    text=f"📢 加入 {channel.title}",
+                                    url=channel_link
+                                )
+                            ])
+                    except Exception as e:
+                        logger.error(f"获取频道信息失败: {e}")
+                kb_buttons.append([
+                    InlineKeyboardButton(
+                        text="✅ 我已全部加入，验证",
+                        callback_data="check_all_subscriptions"
+                    )
+                ])
+                kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+                await callback.message.answer(
+                    f"⚠️ 您需要加入以下频道才能使用机器人\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 需要加入 {len(not_subscribed)} 个频道\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🔗 请点击下方按钮加入，加入后点击验证",
+                    reply_markup=kb
+                )
+            else:
+                try:
+                    record_user(
+                        callback.from_user.id,
+                        username=callback.from_user.username or "",
+                        first_name=callback.from_user.first_name or ""
+                    )
+                except Exception as e:
+                    logger.warning(f"记录用户失败: {e}")
+                await _send_welcome(callback.message)
             return
 
         if data == "back_to_start":
             await callback.answer()
-            from handlers.private import _build_welcome_keyboard
-            default_welcome = (
-                "👋 欢迎使用狼评机器人！🎓\n\n"
-                "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
-                "📝 使用方法：\n"
-                "在群组中输入 @teacher_name 来查询或评价教师\n\n"
-                "例如：@李老师、@王教授、@张老师\n\n"
-                "💡 更多帮助请输入 /帮助"
-            )
-            welcome = get_start_message(default_welcome)
-            start_buttons = get_start_buttons()
-            kb = _build_welcome_keyboard(start_buttons)
-            await callback.message.answer(welcome, reply_markup=kb)
+            await _send_welcome(callback.message)
             return
 
         if data == "check_all_subscriptions":
@@ -290,15 +346,22 @@ A: 可以用别账号""", reply_markup=kb)
                     member = await bot.get_chat_member(channel_id, user_id)
                     if member.status in ('left', 'kicked', 'restricted'):
                         not_subscribed.append(channel_id)
-                except:
+                except Exception:
                     not_subscribed.append(channel_id)
 
             if not_subscribed:
                 await callback.answer("❌ 您还未全部加入频道", show_alert=True)
             else:
                 await callback.answer("✅ 验证成功！")
-                from handlers.private import cmd_start
-                await cmd_start(callback.message)
+                try:
+                    record_user(
+                        callback.from_user.id,
+                        username=callback.from_user.username or "",
+                        first_name=callback.from_user.first_name or ""
+                    )
+                except Exception as e:
+                    logger.warning(f"记录用户失败: {e}")
+                await _send_welcome(callback.message)
             return
 
         # ==================== 管理后台回调 ====================
