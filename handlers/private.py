@@ -415,8 +415,8 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     if "@" not in message.text:
         return
     
-    # 提取 @username
-    pattern = r'@([a-zA-Z0-9_\u4e00-\u9fff]+)'
+    # 提取 @username（仅匹配英文字母、数字和下划线，即 Telegram 用户名格式）
+    pattern = r'@([a-zA-Z0-9_]+)'
     matches = re.findall(pattern, message.text)
     
     if not matches:
