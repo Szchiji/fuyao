@@ -77,7 +77,7 @@ async def cmd_start(message: Message):
                     member = await bot.get_chat_member(channel_id, user_id)
                     if member.status in ('left', 'kicked', 'restricted'):
                         not_subscribed.append(channel_id)
-                except:
+                except Exception:
                     not_subscribed.append(channel_id)
             
             if not_subscribed:

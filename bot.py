@@ -117,10 +117,10 @@ async def webhook_handler(request: web.Request) -> web.Response:
 
 async def polling_task():
     """
-    轮询任务（备份）
-    如果 Webhook 失败，轮询会接管
+    轮询任务
+    在非 Webhook 模式（开发/本地环境）下接收更新
     """
-    logger.info("🔄 轮询备份已启动（轮询作为备份，不是主要方式）")
+    logger.info("🔄 轮询已启动")
     
     try:
         await dp.start_polling(
@@ -136,7 +136,7 @@ async def polling_task():
 
 
 async def main():
-    """主函数 - 混合模式"""
+    """主函数 - 生产环境使用 Webhook，开发环境使用轮询"""
     global bot, webhook_mode, polling_mode
     
     # 创建 Bot 实例
@@ -170,7 +170,7 @@ async def main():
     async def health_check(request):
         """健康检查端点"""
         return web.Response(
-            text='{"status": "ok", "mode": "hybrid"}',
+            text='{"status": "ok"}',
             content_type='application/json'
         )
     
@@ -181,7 +181,7 @@ async def main():
         """获取机器人信息"""
         info = {
             "status": "running",
-            "mode": "hybrid",
+            "mode": "webhook" if webhook_mode else "polling",
             "webhook_enabled": webhook_mode,
             "polling_enabled": polling_mode,
             "bot_id": bot.id if bot else None,
@@ -241,20 +241,24 @@ async def main():
         except Exception as e:
             logger.warning(f"⚠️ 清除 Webhook 失败: {e}")
     
-    # ==================== 启动轮询备份 ====================
-    logger.info("🔄 启动轮询备份任务...")
-    polling_mode = True
-    
-    polling_task_obj = asyncio.create_task(polling_task())
+    # ==================== 启动轮询（仅在非 Webhook 模式下） ====================
+    polling_task_obj = None
+    if not webhook_mode:
+        logger.info("🔄 启动轮询任务...")
+        polling_mode = True
+        polling_task_obj = asyncio.create_task(polling_task())
+    else:
+        logger.info("ℹ️ Webhook 模式已启用，跳过轮询")
+        polling_mode = False
     
     # ==================== 显示启动信息 ====================
     logger.info("")
     logger.info("=" * 50)
-    logger.info("🎉 狼评机器人已启动（混合模式）")
+    logger.info("🎉 狼评机器人已启动")
     logger.info("=" * 50)
     logger.info(f"📊 工作模式:")
     logger.info(f"  • Webhook:  {'✅ 已启用' if webhook_mode else '❌ 已禁用'}")
-    logger.info(f"  • 轮询备份: {'✅ 已启用' if polling_mode else '❌ 已禁用'}")
+    logger.info(f"  • 轮询:     {'✅ 已启用' if polling_mode else '❌ 已禁用'}")
     logger.info(f"🌐 服务地址: http://0.0.0.0:{PORT}")
     logger.info(f"🔗 健康检查: http://localhost:{PORT}/health")
     logger.info(f"📋 机器人信息: http://localhost:{PORT}/info")
@@ -271,12 +275,13 @@ async def main():
     finally:
         logger.info("🛑 关闭机器人...")
         
-        # 取消轮询任务
-        polling_task_obj.cancel()
-        try:
-            await polling_task_obj
-        except asyncio.CancelledError:
-            pass
+        # 取消轮询任务（如果已启动）
+        if polling_task_obj is not None:
+            polling_task_obj.cancel()
+            try:
+                await polling_task_obj
+            except asyncio.CancelledError:
+                pass
         
         # 关闭 Bot 连接
         await bot.session.close()

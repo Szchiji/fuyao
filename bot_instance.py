@@ -5,6 +5,7 @@
 """
 
 import logging
+from collections import OrderedDict
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from config import TELEGRAM_BOT_TOKEN
@@ -17,8 +18,18 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode="HTML")
 )
 
-# 存储频道邀请链接的缓存
-_channel_invite_cache = {}
+# 存储频道邀请链接的缓存（LRU，最多缓存 256 个条目，避免无限增长）
+_channel_invite_cache: OrderedDict = OrderedDict()
+_CACHE_MAX_SIZE = 256
+
+
+def _cache_put(key: str, value: str) -> None:
+    """将条目存入 LRU 缓存，若缓存已满则淘汰最久未使用的条目"""
+    if key in _channel_invite_cache:
+        _channel_invite_cache.move_to_end(key)
+    _channel_invite_cache[key] = value
+    if len(_channel_invite_cache) > _CACHE_MAX_SIZE:
+        _channel_invite_cache.popitem(last=False)
 
 
 async def get_channel_invite_link(channel_id: str) -> str:
@@ -31,10 +42,9 @@ async def get_channel_invite_link(channel_id: str) -> str:
     Returns:
         邀请链接，格式: https://t.me/+xxxxx
     """
-    global _channel_invite_cache
-    
-    # 检查缓存
+    # 检查缓存（命中时移到末尾表示最近使用）
     if channel_id in _channel_invite_cache:
+        _channel_invite_cache.move_to_end(channel_id)
         return _channel_invite_cache[channel_id]
     
     try:
@@ -44,7 +54,7 @@ async def get_channel_invite_link(channel_id: str) -> str:
         # 如果是公开频道，使用用户名生成链接
         if channel.username:
             link = f"https://t.me/{channel.username}"
-            _channel_invite_cache[channel_id] = link
+            _cache_put(channel_id, link)
             logger.info(f"✅ 获取公开频道链接: {channel.username}")
             return link
         
@@ -55,7 +65,7 @@ async def get_channel_invite_link(channel_id: str) -> str:
                 creates_join_request=False
             )
             link = invite_link.invite_link
-            _channel_invite_cache[channel_id] = link
+            _cache_put(channel_id, link)
             logger.info(f"✅ 创建私密频道邀请链接成功")
             return link
         except Exception as e:

@@ -263,8 +263,8 @@ A: 可以用别账号""", reply_markup=kb)
                         kb_buttons.append([
                             InlineKeyboardButton(text=f"📢 {channel.title}", url=link)
                         ])
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"获取频道信息失败: {e}")
 
             kb_buttons.append([InlineKeyboardButton(text="🔙 返回", callback_data="back_to_start")])
 
