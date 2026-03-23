@@ -103,11 +103,11 @@ def init_db():
             """)
             
             try:
-                cursor.execute("CREATE INDEX idx_teacher ON recs(teacher)")
-                cursor.execute("CREATE INDEX idx_user ON recs(user_id)")
-                cursor.execute("CREATE INDEX idx_time ON recs(time)")
-            except:
-                pass
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
+            except Exception:
+                conn.rollback()
         else:
             logger.info("📊 初始化 SQLite 表...")
             
