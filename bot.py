@@ -15,6 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from config import TELEGRAM_BOT_TOKEN, ADMIN_IDS
 from database import init_db
+from utils.middleware import BlacklistMiddleware
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -89,6 +90,11 @@ async def setup_dispatcher():
     
     dp.include_router(private_router)
     logger.info("✅ private_router 已注册")
+
+    # 注册黑名单中间件（拦截所有消息和回调）
+    dp.message.middleware(BlacklistMiddleware())
+    dp.callback_query.middleware(BlacklistMiddleware())
+    logger.info("✅ 黑名单中间件已注册")
 
 
 async def webhook_handler(request: web.Request) -> web.Response:
