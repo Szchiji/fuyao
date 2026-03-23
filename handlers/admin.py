@@ -481,9 +481,9 @@ async def manage_teacher(message: Message):
 
         manage_text = f"""👨‍🏫 教师数据管理
 
-━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 📌 教师：@{teacher_name}{nickname_line}{id_line}
-━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 📊 统计信息：
 • 总评价数：{stats['total']}
@@ -999,9 +999,9 @@ async def process_teacher_name_input(message: Message, state: FSMContext):
 
     manage_text = f"""👨‍🏫 教师数据管理
 
-━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 📌 教师：@{teacher_name}{nickname_line}{id_line}
-━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 📊 统计信息：
 • 总评价数：{stats['total']}

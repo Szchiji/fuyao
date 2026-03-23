@@ -111,9 +111,9 @@ async def cmd_start(message: Message):
                 
                 await message.reply(
                     f"⚠️ 您需要加入以下频道才能使用机器人\n\n"
-                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"━━━━━━━━━━━━━\n"
                     f"📊 需要加入 {len(not_subscribed)} 个频道\n"
-                    f"━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"━━━━━━━━━━━━━\n\n"
                     f"🔗 请点击下方按钮加入，加入后点击验证",
                     reply_markup=kb
                 )
@@ -447,9 +447,9 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         
         if stats["total"] == 0:
             display_text = (
-                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"━━━━━━━━━━━━━\n"
                 f"{header}\n"
-                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"━━━━━━━━━━━━━\n\n"
                 f"📭 暂无评价记录\n\n"
                 f"快来成为第一个评价的人吧！"
             )
@@ -458,9 +458,9 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
             not_rec_pct = 100 - recommend_percentage
             
             display_text = (
-                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"━━━━━━━━━━━━━\n"
                 f"{header}\n"
-                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"━━━━━━━━━━━━━\n\n"
                 f"📊 评价统计：\n"
                 f"👍 推荐：{stats['recommend']} 人（{recommend_percentage}%）\n"
                 f"👎 不推荐：{stats['not_recommend']} 人（{not_rec_pct}%）\n"
@@ -469,13 +469,13 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
             
             # latest 字段顺序: id(0), user_id(1), recommend(2), reason(3), time(4)
             if stats["latest"]:
-                display_text += f"\n━━━━━━━━━━━━━━━━━━━\n📝 最新评价（最多显示 {MAX_INLINE_REVIEWS} 条）：\n\n"
+                display_text += f"\n━━━━━━━━━━━━━\n📝 最新评价（最多显示 {MAX_INLINE_REVIEWS} 条）：\n\n"
                 for i, review in enumerate(stats["latest"][:MAX_INLINE_REVIEWS], 1):
                     rec_emoji = "👍" if review[2] else "👎"
                     reason = review[3]
                     display_text += f"{i}. {rec_emoji} [#{review[0]}]\n"
                     display_text += f"   💬 {reason[:50]}{'...' if len(reason) > 50 else ''}\n\n"
-                display_text += "━━━━━━━━━━━━━━━━━━━"
+                display_text += "━━━━━━━━━━━━━"
         
         # 构建按钮
         action_row = [
