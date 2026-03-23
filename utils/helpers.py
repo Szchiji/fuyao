@@ -1,6 +1,31 @@
 # utils/helpers.py
+import logging
+from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database import get_teacher_detail
+
+logger = logging.getLogger(__name__)
+
+
+async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid: str):
+    """
+    若昵称或 ID 未在数据库中设置，尝试通过 Telegram API 获取。
+    返回 (nickname, tid) 元组，值不变或填充自 Telegram。
+    """
+    if nickname and tid:
+        return nickname, tid
+    try:
+        tg_chat = await bot.get_chat(f"@{teacher_name}")
+        if not nickname:
+            full_name = tg_chat.first_name or ""
+            if getattr(tg_chat, "last_name", None):
+                full_name = f"{full_name} {tg_chat.last_name}".strip()
+            nickname = full_name
+        if not tid:
+            tid = str(tg_chat.id)
+    except Exception as e:
+        logger.debug(f"从 Telegram 获取 @{teacher_name} 信息失败: {e}")
+    return nickname, tid
 
 async def send_teacher_detail(message: Message, teacher: str, edit_msg_id=None):
     """发送教师评价详情"""

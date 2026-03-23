@@ -21,7 +21,7 @@ from database import (
 )
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
-from utils.helpers import format_leaderboard_text
+from utils.helpers import format_leaderboard_text, fetch_tg_teacher_info
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -433,6 +433,9 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         
         nickname = teacher_info.get("nickname", "")
         tid = teacher_info.get("teacher_id", "")
+
+        # 若昵称或ID未在数据库中设置，尝试从 Telegram 获取
+        nickname, tid = await fetch_tg_teacher_info(bot, teacher_name, nickname, tid)
         
         # 构建教师信息头部
         header = f"👨‍🏫 @{teacher_name}"
