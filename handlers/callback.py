@@ -18,7 +18,15 @@ from database import (
     get_teacher_all_ratings,
     delete_rating_by_id,
     delete_teacher_data_from_db,
-    get_leaderboard
+    get_leaderboard,
+    get_start_message,
+    get_start_buttons,
+    set_start_message,
+    set_start_buttons,
+    get_all_user_ids,
+    get_teacher_info,
+    set_teacher_info,
+    get_teacher_reviews_page
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
@@ -26,6 +34,8 @@ from utils.helpers import format_leaderboard_text
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+REVIEWS_PER_PAGE = 5  # 「更多评价」每页显示的评价条数
 
 
 def _is_admin(user_id: int) -> bool:
@@ -255,27 +265,18 @@ A: 可以用别账号""", reply_markup=kb)
 
         if data == "back_to_start":
             await callback.answer()
-            from database import get_start_message
-            from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-            welcome = get_start_message(
-                """👋 欢迎使用狼评机器人！🎓
-
-这是一个教师评价平台，帮助同学们了解教师的教学情况。
-
-📝 使用方法:
-在群组中输入 @teacher_name 来查询或评价教师
-
-例如: @李老师、@王教授、@张老师
-
-💡 更多帮助请输入 /帮助"""
+            from handlers.private import _build_welcome_keyboard
+            default_welcome = (
+                "👋 欢迎使用狼评机器人！🎓\n\n"
+                "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
+                "📝 使用方法：\n"
+                "在群组中输入 @teacher_name 来查询或评价教师\n\n"
+                "例如：@李老师、@王教授、@张老师\n\n"
+                "💡 更多帮助请输入 /帮助"
             )
-            kb = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
-                    [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")]
-                ],
-                resize_keyboard=True
-            )
+            welcome = get_start_message(default_welcome)
+            start_buttons = get_start_buttons()
+            kb = _build_welcome_keyboard(start_buttons)
             await callback.message.answer(welcome, reply_markup=kb)
             return
 
@@ -693,7 +694,12 @@ A: 可以用别账号""", reply_markup=kb)
 • /诊断频道 - 深度诊断频道
 
 ✏️ 内容管理：
-• /设置欢迎语 [欢迎语] - 设置欢迎语
+• /设置欢迎语 [欢迎语] - 设置欢迎语（支持添加按钮）
+
+📢 广播功能：
+• 点击菜单中的 📢 广播消息 按钮
+• 向所有使用过机器人的用户发送消息
+• 支持添加自定义按钮
 
 👨‍🏫 教师管理：
 • /管理教师 [教师名] - 管理教师数据（含按钮）
@@ -955,6 +961,280 @@ ID: <code>{user_id}</code>
             await callback.message.edit_text(menu_text, reply_markup=build_admin_menu_keyboard())
             return
 
+        # ==================== 欢迎语按钮相关回调 ====================
+
+        if data == "save_welcome_no_buttons":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            state_data = await state.get_data()
+            welcome_msg = state_data.get("welcome_msg", "")
+            await state.clear()
+
+            if welcome_msg:
+                set_start_message(welcome_msg)
+                set_start_buttons([])
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+            ])
+            await callback.answer()
+            await callback.message.edit_text(
+                f"✅ 欢迎语已保存（无附加按钮）",
+                reply_markup=kb
+            )
+            return
+
+        if data == "add_welcome_buttons":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await callback.answer()
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_welcome_buttons")]
+            ])
+            await callback.message.edit_text(
+                """🔘 添加欢迎语按钮
+
+请按以下格式发送按钮信息（每行一个按钮，最多 5 个）：
+
+格式：按钮名称|链接地址
+
+示例：
+加入官方群|https://t.me/xxxx
+查看公告|https://example.com/news
+
+直接发送按钮内容即可：""",
+                reply_markup=kb
+            )
+            return
+
+        if data == "cancel_welcome_buttons":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await state.clear()
+            from handlers.admin import build_admin_menu_keyboard
+            await callback.answer("✅ 已取消")
+            stats = get_global_stats()
+            channels = get_all_required_channels()
+            channel_status = f"✅ {len(channels)} 个频道" if channels else "❌ 未设置"
+            menu_text = (
+                f"🛠️ 管理员后台\n\n"
+                f"📊 统计数据：\n• 总评价数: {stats['total_eval']}\n"
+                f"• 评价教师数: {stats['total_teacher']}\n• 今日评价: {stats['today']}\n\n"
+                f"🔐 频道管理：\n• 状态: {channel_status}\n\n请点击下方按钮进行操作："
+            )
+            await callback.message.edit_text(menu_text, reply_markup=build_admin_menu_keyboard())
+            return
+
+        # ==================== 广播相关回调 ====================
+
+        if data == "admin_broadcast":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await state.set_state(AdminStates.waiting_broadcast_msg)
+            await callback.answer()
+
+            user_count = len(get_all_user_ids())
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_broadcast")]
+            ])
+            await callback.message.edit_text(
+                f"""📢 发送广播消息
+
+当前共有 {user_count} 名注册用户可接收广播。
+
+请直接发送要广播的消息内容：
+
+💡 支持换行、表情符号和 HTML 格式
+💡 可在下一步选择是否附加按钮""",
+                reply_markup=kb
+            )
+            return
+
+        if data == "broadcast_send_no_buttons":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            state_data = await state.get_data()
+            broadcast_msg = state_data.get("broadcast_msg", "")
+            await state.clear()
+
+            if not broadcast_msg:
+                await callback.answer("❌ 广播内容为空", show_alert=True)
+                return
+
+            from handlers.admin import _do_broadcast
+            await callback.answer()
+            await callback.message.edit_text("📤 正在发送广播，请稍候...")
+            await _do_broadcast(callback.message, broadcast_msg, [])
+            return
+
+        if data == "add_broadcast_buttons":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await callback.answer()
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ 取消广播", callback_data="cancel_broadcast")]
+            ])
+            await callback.message.edit_text(
+                """🔘 为广播添加按钮
+
+请按以下格式发送按钮信息（每行一个按钮，最多 5 个）：
+
+格式：按钮名称|链接地址
+
+示例：
+了解更多|https://example.com
+加入群组|https://t.me/xxxx
+
+直接发送按钮内容即可：""",
+                reply_markup=kb
+            )
+            return
+
+        if data == "cancel_broadcast":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await state.clear()
+            from handlers.admin import build_admin_menu_keyboard
+            await callback.answer("✅ 广播已取消")
+            stats = get_global_stats()
+            channels = get_all_required_channels()
+            channel_status = f"✅ {len(channels)} 个频道" if channels else "❌ 未设置"
+            menu_text = (
+                f"🛠️ 管理员后台\n\n"
+                f"📊 统计数据：\n• 总评价数: {stats['total_eval']}\n"
+                f"• 评价教师数: {stats['total_teacher']}\n• 今日评价: {stats['today']}\n\n"
+                f"🔐 频道管理：\n• 状态: {channel_status}\n\n请点击下方按钮进行操作："
+            )
+            await callback.message.edit_text(menu_text, reply_markup=build_admin_menu_keyboard())
+            return
+
+        # ==================== 设置教师昵称/ID ====================
+
+        if data.startswith("set_teacher_info|"):
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            teacher_name = data.split("|", 1)[1]
+            teacher_info = get_teacher_info(teacher_name)
+
+            await state.update_data(teacher_name=teacher_name)
+            await state.set_state(AdminStates.waiting_teacher_info)
+            await callback.answer()
+
+            current = ""
+            if teacher_info["nickname"] or teacher_info["teacher_id"]:
+                current = f"\n\n当前设置：\n📛 昵称：{teacher_info['nickname'] or '（未设置）'}\n🆔 ID：{teacher_info['teacher_id'] or '（未设置）'}"
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
+            ])
+            await callback.message.edit_text(
+                f"""✏️ 设置教师昵称/ID
+
+教师：@{teacher_name}{current}
+
+请按以下格式发送（昵称和ID用 | 分隔）：
+昵称|ID编号
+
+示例：
+李明教授|T001
+王老师|EMP202
+
+如只设置昵称，可省略ID：
+张数学老师
+
+直接发送内容即可：""",
+                reply_markup=kb
+            )
+            return
+
+        # ==================== 查看更多评价 ====================
+
+        if data.startswith("more_reviews|"):
+            parts = data.split("|")
+            if len(parts) < 3:
+                await callback.answer("❌ 数据错误", show_alert=True)
+                return
+
+            teacher_name = parts[1]
+            try:
+                page = int(parts[2])
+            except ValueError:
+                page = 0
+
+            per_page = REVIEWS_PER_PAGE
+            reviews = get_teacher_reviews_page(teacher_name, page, per_page)
+            stats = get_teacher_stats(teacher_name)
+            teacher_info = get_teacher_info(teacher_name)
+            total = stats["total"]
+
+            if not reviews:
+                await callback.answer("📭 没有更多评价了", show_alert=True)
+                return
+
+            nickname = teacher_info.get("nickname", "")
+            tid = teacher_info.get("teacher_id", "")
+            header = f"📋 @{teacher_name}"
+            if nickname:
+                header += f"（{nickname}）"
+            if tid:
+                header += f" · ID: {tid}"
+
+            offset = page * per_page
+            text = f"{header} 的评价\n\n"
+            text += f"━━━━━━━━━━━━━━━━━━━\n"
+            text += f"第 {offset + 1}–{min(offset + per_page, total)} 条 / 共 {total} 条\n"
+            text += f"━━━━━━━━━━━━━━━━━━━\n\n"
+
+            for i, review in enumerate(reviews, offset + 1):
+                rec_emoji = "👍" if review[2] else "👎"
+                reason_text = review[3]
+                time_str = str(review[4])[:16] if review[4] else ""
+                text += f"{i}. {rec_emoji} [#{review[0]}]\n"
+                text += f"   💬 {reason_text[:60]}{'...' if len(reason_text) > 60 else ''}\n"
+                if time_str:
+                    text += f"   🕐 {time_str}\n"
+                text += "\n"
+
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(
+                    InlineKeyboardButton(text="⬅️ 上一页", callback_data=f"more_reviews|{teacher_name}|{page-1}")
+                )
+            if offset + per_page < total:
+                nav_buttons.append(
+                    InlineKeyboardButton(text="➡️ 下一页", callback_data=f"more_reviews|{teacher_name}|{page+1}")
+                )
+
+            kb_rows = []
+            if nav_buttons:
+                kb_rows.append(nav_buttons)
+            kb_rows.append([
+                InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
+                InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
+            ])
+
+            kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+            await callback.answer()
+            await callback.message.edit_text(text, reply_markup=kb)
+            return
+
     except Exception as e:
         logger.error(f"处理回调时出错: {e}", exc_info=True)
         await callback.answer(f"❌ 出错: {str(e)[:50]}", show_alert=True)
+

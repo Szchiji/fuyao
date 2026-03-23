@@ -12,9 +12,12 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, R
 from aiogram.fsm.context import FSMContext
 from database import (
     get_start_message,
+    get_start_buttons,
     get_all_required_channels,
     get_teacher_stats,
-    get_leaderboard
+    get_leaderboard,
+    record_user,
+    get_teacher_info
 )
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
@@ -22,6 +25,25 @@ from utils.helpers import format_leaderboard_text
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+MAX_INLINE_REVIEWS = 3  # 卡片内最多显示的评价条数
+
+
+def _build_welcome_keyboard(start_buttons: list) -> InlineKeyboardMarkup | ReplyKeyboardMarkup:
+    """根据是否有自定义按钮决定键盘类型"""
+    if start_buttons:
+        kb_rows = []
+        for btn in start_buttons:
+            kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
+        return InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    else:
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
+                [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")]
+            ],
+            resize_keyboard=True
+        )
 
 
 @router.message(Command("start", "开始"))
@@ -32,7 +54,17 @@ async def cmd_start(message: Message):
 
     user_id = message.from_user.id
     channels = get_all_required_channels()
-    
+
+    # 记录用户（用于广播功能）
+    try:
+        record_user(
+            user_id,
+            username=message.from_user.username or "",
+            first_name=message.from_user.first_name or ""
+        )
+    except Exception as e:
+        logger.warning(f"记录用户失败: {e}")
+
     logger.info(f"👤 用户 {user_id} 启动机器人，频道数: {len(channels)}")
     
     if channels:
@@ -77,11 +109,11 @@ async def cmd_start(message: Message):
                 kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
                 
                 await message.reply(
-                    f"""⚠️ 您需要加入所有频道才能使用此机器人
-
-📊 需要加入 {len(not_subscribed)} 个频道
-
-🔗 请点击下方按钮加入""",
+                    f"⚠️ 您需要加入以下频道才能使用机器人\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 需要加入 {len(not_subscribed)} 个频道\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🔗 请点击下方按钮加入，加入后点击验证",
                     reply_markup=kb
                 )
                 return
@@ -100,32 +132,23 @@ async def cmd_start(message: Message):
             
             await message.reply(
                 "⚠️ 无法验证您的订阅状态\n\n"
-                "🔗 请确保��加入所有频道后重新验证",
+                "🔗 请确保已加入所有频道后重新验证",
                 reply_markup=kb
             )
             return
 
     # 用户已订阅或未设置频道要求
-    welcome = get_start_message(
-        """👋 欢迎使用狼评机器人！🎓
-
-这是一个教师评价平台，帮助同学们了解教师的教学情况。
-
-📝 使用方法:
-在群组中输入 @teacher_name 来查询或评价教师
-
-例如: @李老师、@王教授、@张老师
-
-💡 更多帮助请输入 /帮助"""
+    default_welcome = (
+        "👋 欢迎使用狼评机器人！🎓\n\n"
+        "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
+        "📝 使用方法：\n"
+        "在群组中输入 @teacher_name 来查询或评价教师\n\n"
+        "例如：@李老师、@王教授、@张老师\n\n"
+        "💡 更多帮助请输入 /帮助"
     )
-    
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
-            [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")]
-        ],
-        resize_keyboard=True
-    )
+    welcome = get_start_message(default_welcome)
+    start_buttons = get_start_buttons()
+    kb = _build_welcome_keyboard(start_buttons)
     
     await message.reply(welcome, reply_markup=kb)
 
@@ -406,34 +429,68 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     
     try:
         stats = get_teacher_stats(teacher_name)
+        teacher_info = get_teacher_info(teacher_name)
+        
+        nickname = teacher_info.get("nickname", "")
+        tid = teacher_info.get("teacher_id", "")
+        
+        # 构建教师信息头部
+        header = f"👨‍🏫 @{teacher_name}"
+        if nickname:
+            header += f"\n📛 昵称：{nickname}"
+        if tid:
+            header += f"\n🆔 ID：{tid}"
         
         if stats["total"] == 0:
-            display_text = f"""【@{teacher_name}】
-暂无评价记录
-快来成为第一个评价的人吧！"""
+            display_text = (
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"{header}\n"
+                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📭 暂无评价记录\n\n"
+                f"快来成为第一个评价的人吧！"
+            )
         else:
             recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
+            not_rec_pct = 100 - recommend_percentage
             
-            display_text = f"""【@{teacher_name}】
-📊 评价统计：
-👍 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
-👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
-
-📈 总评价数: {stats['total']}"""
+            display_text = (
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"{header}\n"
+                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📊 评价统计：\n"
+                f"👍 推荐：{stats['recommend']} 人（{recommend_percentage}%）\n"
+                f"👎 不推荐：{stats['not_recommend']} 人（{not_rec_pct}%）\n"
+                f"📈 共 {stats['total']} 条评价\n"
+            )
             
             # latest 字段顺序: id(0), user_id(1), recommend(2), reason(3), time(4)
             if stats["latest"]:
-                display_text += "\n\n📝 最新评价："
-                for i, review in enumerate(stats["latest"][:2], 1):
+                display_text += f"\n━━━━━━━━━━━━━━━━━━━\n📝 最新评价（最多显示 {MAX_INLINE_REVIEWS} 条）：\n\n"
+                for i, review in enumerate(stats["latest"][:MAX_INLINE_REVIEWS], 1):
                     rec_emoji = "👍" if review[2] else "👎"
-                    display_text += f"\n{i}. {rec_emoji} [#{review[0]}] {review[3][:40]}..."
+                    reason = review[3]
+                    display_text += f"{i}. {rec_emoji} [#{review[0]}]\n"
+                    display_text += f"   💬 {reason[:50]}{'...' if len(reason) > 50 else ''}\n\n"
+                display_text += "━━━━━━━━━━━━━━━━━━━"
         
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
-                InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
-            ]
-        ])
+        # 构建按钮
+        action_row = [
+            InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
+            InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
+        ]
+        kb_rows = [action_row]
+        
+        # 如果评价数超过 MAX_INLINE_REVIEWS 条，添加"更多评价"按钮
+        if stats["total"] > MAX_INLINE_REVIEWS:
+            remaining = stats["total"] - MAX_INLINE_REVIEWS
+            kb_rows.append([
+                InlineKeyboardButton(
+                    text=f"📋 查看更多评价（{remaining} 条）",
+                    callback_data=f"more_reviews|{teacher_name}|0"
+                )
+            ])
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
         
         await message.reply(display_text, reply_markup=kb)
         logger.info(f"✅ 显示 @{teacher_name} 的评价信息")

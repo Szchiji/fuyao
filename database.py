@@ -83,6 +83,25 @@ def init_db():
                 )
             """)
             
+            # 用户记录表（用于广播）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id BIGINT PRIMARY KEY,
+                    username TEXT DEFAULT '',
+                    first_name TEXT DEFAULT '',
+                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 教师信息表（昵称和ID）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS teachers (
+                    name TEXT PRIMARY KEY,
+                    nickname TEXT DEFAULT '',
+                    teacher_id TEXT DEFAULT ''
+                )
+            """)
+            
             try:
                 cursor.execute("CREATE INDEX idx_teacher ON recs(teacher)")
                 cursor.execute("CREATE INDEX idx_user ON recs(user_id)")
@@ -110,6 +129,25 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
                     value TEXT
+                )
+            """)
+            
+            # 用户记录表（用于广播）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT DEFAULT '',
+                    first_name TEXT DEFAULT '',
+                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 教师信息表（昵称和ID）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS teachers (
+                    name TEXT PRIMARY KEY,
+                    nickname TEXT DEFAULT '',
+                    teacher_id TEXT DEFAULT ''
                 )
             """)
             
@@ -446,6 +484,158 @@ def get_start_message(default: str = "") -> str:
     except Exception as e:
         logger.error(f"获取欢迎语失败: {e}")
         return default
+
+
+def set_start_buttons(buttons: list):
+    """保存欢迎语按钮（列表形式 [{"text": ..., "url": ...}, ...]）"""
+    import json
+    try:
+        value = json.dumps(buttons, ensure_ascii=False)
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute(
+                "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s",
+                ("start_message_buttons", value, value)
+            )
+        else:
+            cursor.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("start_message_buttons", value)
+            )
+        conn.commit()
+        conn.close()
+        logger.info(f"✅ 欢迎语按钮已保存，共 {len(buttons)} 个")
+    except Exception as e:
+        logger.error(f"保存欢迎语按钮失败: {e}")
+
+
+def get_start_buttons() -> list:
+    """获取欢迎语按钮列表"""
+    import json
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute("SELECT value FROM settings WHERE key = %s", ("start_message_buttons",))
+        else:
+            cursor.execute("SELECT value FROM settings WHERE key = ?", ("start_message_buttons",))
+        result = cursor.fetchone()
+        conn.close()
+        if result and result[0]:
+            return json.loads(result[0])
+        return []
+    except Exception as e:
+        logger.error(f"获取欢迎语按钮失败: {e}")
+        return []
+
+
+def record_user(user_id: int, username: str = "", first_name: str = ""):
+    """记录使用过机器人的用户（用于广播）"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        uname = username or ""
+        fname = first_name or ""
+        if USE_POSTGRES:
+            cursor.execute(
+                """INSERT INTO users (user_id, username, first_name)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET username = %s, first_name = %s""",
+                (user_id, uname, fname, uname, fname)
+            )
+        else:
+            cursor.execute(
+                "INSERT OR REPLACE INTO users (user_id, username, first_name) VALUES (?, ?, ?)",
+                (user_id, uname, fname)
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"记录用户失败: {e}")
+
+
+def get_all_user_ids() -> list:
+    """获取所有曾使用过机器人的用户 ID"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users")
+        rows = cursor.fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error(f"获取用户列表失败: {e}")
+        return []
+
+
+def set_teacher_info(name: str, nickname: str = "", teacher_id: str = ""):
+    """设置教师昵称和ID"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute(
+                """INSERT INTO teachers (name, nickname, teacher_id)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (name) DO UPDATE SET nickname = %s, teacher_id = %s""",
+                (name, nickname, teacher_id, nickname, teacher_id)
+            )
+        else:
+            cursor.execute(
+                "INSERT OR REPLACE INTO teachers (name, nickname, teacher_id) VALUES (?, ?, ?)",
+                (name, nickname, teacher_id)
+            )
+        conn.commit()
+        conn.close()
+        logger.info(f"✅ 教师 @{name} 信息已更新")
+    except Exception as e:
+        logger.error(f"设置教师信息失败: {e}")
+
+
+def get_teacher_info(name: str) -> dict:
+    """获取教师昵称和ID，未设置则返回空字符串"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute("SELECT nickname, teacher_id FROM teachers WHERE name = %s", (name,))
+        else:
+            cursor.execute("SELECT nickname, teacher_id FROM teachers WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return {"nickname": row[0] or "", "teacher_id": row[1] or ""}
+        return {"nickname": "", "teacher_id": ""}
+    except Exception as e:
+        logger.error(f"获取教师信息失败: {e}")
+        return {"nickname": "", "teacher_id": ""}
+
+
+def get_teacher_reviews_page(teacher: str, page: int = 0, per_page: int = 5) -> list:
+    """分页获取教师评价（用于"更多评价"按钮）"""
+    try:
+        offset = page * per_page
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute(
+                "SELECT id, user_id, recommend, reason, time FROM recs"
+                " WHERE teacher = %s ORDER BY time DESC LIMIT %s OFFSET %s",
+                (teacher, per_page, offset)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, user_id, recommend, reason, time FROM recs"
+                " WHERE teacher = ? ORDER BY time DESC LIMIT ? OFFSET ?",
+                (teacher, per_page, offset)
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return rows if rows else []
+    except Exception as e:
+        logger.error(f"分页获取教师评价失败: {e}")
+        return []
 
 
 def get_encourage() -> str:
