@@ -56,9 +56,12 @@ else:
     logger.info(f"📝 使用 SQLite 数据库: {DATABASE_PATH}")
 
 # ==================== 常量配置 ====================
-MIN_REASON_LENGTH = 12
-DAILY_RATING_LIMIT = 0
-RATING_RETENTION_DAYS = 0
+MIN_REASON_LENGTH = int(os.getenv("MIN_REASON_LENGTH", "12"))
+if MIN_REASON_LENGTH < 1:
+    raise ValueError(f"❌ MIN_REASON_LENGTH 必须大于 0，当前值: {MIN_REASON_LENGTH}")
+
+DAILY_RATING_LIMIT = int(os.getenv("DAILY_RATING_LIMIT", "0"))
+RATING_RETENTION_DAYS = int(os.getenv("RATING_RETENTION_DAYS", "0"))
 
 # ==================== 调试配置 ====================
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"

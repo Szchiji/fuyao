@@ -296,7 +296,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("⛔ 机器人���止")
+        logger.info("⛔ 机器人已停止")
     except Exception as e:
         logger.error(f"❌ 致命错误: {e}", exc_info=True)
         exit(1)
