@@ -13,13 +13,17 @@ from database import (
     remove_required_channel,
     get_all_required_channels,
     set_start_message,
+    set_start_buttons,
     get_global_stats,
     get_connection,
     get_teacher_stats,
     delete_teacher_data_from_db,
     delete_user_rating,
     get_teacher_all_ratings,
-    delete_rating_by_id
+    delete_rating_by_id,
+    get_all_user_ids,
+    set_teacher_info,
+    get_teacher_info
 )
 from utils.decorators import admin_only
 from bot_instance import bot
@@ -36,6 +40,22 @@ logger.info("🚀 加载 admin_router...")
 from config import ADMIN_IDS
 logger.info(f"📝 admin_router 已创建，管理员数: {len(ADMIN_IDS)}")
 logger.info(f"📝 管理员 ID 列表: {ADMIN_IDS}")
+
+MAX_BUTTON_COUNT = 5  # 欢迎语/广播最多支持的按钮数
+
+
+def parse_buttons_text(text: str) -> list:
+    """解析按钮文本（格式: 每行 "按钮名称|URL"）"""
+    buttons = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if "|" in line:
+            parts = line.split("|", 1)
+            btn_text = parts[0].strip()
+            btn_url = parts[1].strip()
+            if btn_text and btn_url:
+                buttons.append({"text": btn_text, "url": btn_url})
+    return buttons[:MAX_BUTTON_COUNT]
 
 
 def build_admin_menu_keyboard() -> InlineKeyboardMarkup:
@@ -58,6 +78,7 @@ def build_admin_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👨‍🏫 管理教师", callback_data="admin_manage_teacher")
         ],
         [
+            InlineKeyboardButton(text="📢 广播消息", callback_data="admin_broadcast"),
             InlineKeyboardButton(text="📖 管理帮助", callback_data="admin_help")
         ]
     ])
@@ -382,7 +403,12 @@ async def admin_help(message: Message):
 • /诊断频道 - 深度诊断频道
 
 ✏️ 内容管理：
-• /设置欢迎语 [欢迎语] - 设置欢迎语
+• /设置欢迎语 [欢迎语] - 设置欢迎语（支持添加按钮）
+
+📢 广播功能：
+• 点击 /管理 → 📢 广播消息 按钮
+• 向所有使用过机器人的用户发送消息
+• 支持添加自定义按钮
 
 👨‍🏫 教师管理：
 • /管理教师 [教师名] - 管理教师数据（含按钮）
@@ -394,8 +420,9 @@ async def admin_help(message: Message):
 💡 交互式操作（推荐）：
 点击 /管理 进入后台，所有操作均可通过按钮完成：
 • 添加/删除/测试频道
-• 设置欢迎语（直接发送文本）
-• 管理教师数据（直接发送教师名）
+• 设置欢迎语（可附加按钮）
+• 广播消息（可附加按钮）
+• 管理教师数据（设置昵称/ID）
 
 ❓ 其他：
 • /管理帮助 - 显示此帮助"""
@@ -419,8 +446,9 @@ async def manage_teacher(message: Message):
 
         teacher_name = parts[1].strip()
 
-        # 获取教师统计
+        # 获取教师统计和信息
         stats = get_teacher_stats(teacher_name)
+        teacher_info = get_teacher_info(teacher_name)
 
         if stats["total"] == 0:
             await message.reply(f"❌ 教师 @{teacher_name} 没有任何评价\n\n无法进行管理操作")
@@ -428,20 +456,25 @@ async def manage_teacher(message: Message):
 
         # 显示管理界面（含按钮）
         recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
+        nickname_line = f"\n📛 昵称：{teacher_info['nickname']}" if teacher_info["nickname"] else ""
+        id_line = f"\n🆔 ID：{teacher_info['teacher_id']}" if teacher_info["teacher_id"] else ""
 
         manage_text = f"""👨‍🏫 教师数据管理
 
-教师: @{teacher_name}
+━━━━━━━━━━━━━━━━━━━
+📌 教师：@{teacher_name}{nickname_line}{id_line}
+━━━━━━━━━━━━━━━━━━━
 
-📊 统计信息:
-• 总评价数: {stats['total']}
-• 👍 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
-• 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
+📊 统计信息：
+• 总评价数：{stats['total']}
+• 👍 推荐：{stats['recommend']} 人（{recommend_percentage}%）
+• 👎 不推荐：{stats['not_recommend']} 人（{100-recommend_percentage}%）
 
-⚠️ 注意: 删除操作不可恢复"""
+⚠️ 注意：删除操作不可恢复"""
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📝 查看所有评价", callback_data=f"view_teacher_ratings|{teacher_name}")],
+            [InlineKeyboardButton(text="✏️ 设置昵称/ID", callback_data=f"set_teacher_info|{teacher_name}")],
             [InlineKeyboardButton(text="🗑️ 删除该教师全部数据", callback_data=f"delete_all_teacher|{teacher_name}")],
             [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
         ])
@@ -683,25 +716,193 @@ async def process_channel_id_input(message: Message, state: FSMContext):
 # ==================== FSM: 等待欢迎语输入 ====================
 @router.message(StateFilter(AdminStates.waiting_welcome_msg))
 async def process_welcome_msg_input(message: Message, state: FSMContext):
-    """处理管理员输入的欢迎语"""
+    """处理管理员输入的欢迎语（收到文本后询问是否添加按钮）"""
     from config import ADMIN_IDS
     if message.from_user.id not in ADMIN_IDS:
         await state.clear()
         return
 
     welcome_msg = message.text.strip() if message.text else ""
-    await state.clear()
 
     if not welcome_msg:
         await message.reply("❌ 未收到有效内容，操作已取消")
+        await state.clear()
+        return
+
+    # 保存欢迎语到状态，进入"是否添加按钮"阶段
+    await state.update_data(welcome_msg=welcome_msg)
+    await state.set_state(AdminStates.waiting_welcome_buttons)
+
+    preview = welcome_msg[:80] + ("..." if len(welcome_msg) > 80 else "")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏭️ 直接保存（无按钮）", callback_data="save_welcome_no_buttons"),
+            InlineKeyboardButton(text="🔘 添加按钮", callback_data="add_welcome_buttons")
+        ],
+        [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_welcome_buttons")]
+    ])
+    await message.reply(
+        f"✅ 欢迎语内容已收到：\n\n{preview}\n\n是否为欢迎语添加自定义按钮？",
+        reply_markup=kb
+    )
+    logger.info(f"✅ 管理员 {message.from_user.id} 输入欢迎语，等待选择是否添加按钮")
+
+
+# ==================== FSM: 等待欢迎语按钮输入 ====================
+@router.message(StateFilter(AdminStates.waiting_welcome_buttons))
+async def process_welcome_buttons_input(message: Message, state: FSMContext):
+    """处理管理员输入的欢迎语按钮列表"""
+    from config import ADMIN_IDS
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    buttons_text = message.text.strip() if message.text else ""
+    data = await state.get_data()
+    welcome_msg = data.get("welcome_msg", "")
+    await state.clear()
+
+    if not buttons_text:
+        await message.reply("❌ 未收到按钮内容，操作已取消")
+        return
+
+    buttons = parse_buttons_text(buttons_text)
+    if not buttons:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply(
+            "❌ 未能解析有效按钮\n\n格式示例：\n加入群组|https://t.me/xxx",
+            reply_markup=kb
+        )
         return
 
     set_start_message(welcome_msg)
+    set_start_buttons(buttons)
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
     ])
-    await message.reply(f"✅ 欢迎语已更新:\n\n{welcome_msg}", reply_markup=kb)
-    logger.info(f"✅ 管理员 {message.from_user.id} 通过交互式方式设置欢迎语")
+    btn_names = "、".join(b["text"] for b in buttons)
+    await message.reply(
+        f"✅ 欢迎语及按钮已保存！\n\n📝 欢迎语：{welcome_msg[:60]}{'...' if len(welcome_msg) > 60 else ''}\n🔘 按钮：{btn_names}",
+        reply_markup=kb
+    )
+    logger.info(f"✅ 管理员 {message.from_user.id} 设置欢迎语（含 {len(buttons)} 个按钮）")
+
+
+# ==================== FSM: 等待广播消息输入 ====================
+@router.message(StateFilter(AdminStates.waiting_broadcast_msg))
+async def process_broadcast_msg_input(message: Message, state: FSMContext):
+    """处理管理员输入的广播消息内容"""
+    from config import ADMIN_IDS
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    broadcast_msg = message.text.strip() if message.text else ""
+
+    if not broadcast_msg:
+        await message.reply("❌ 未收到有效内容，操作已取消")
+        await state.clear()
+        return
+
+    await state.update_data(broadcast_msg=broadcast_msg)
+    await state.set_state(AdminStates.waiting_broadcast_buttons)
+
+    user_count = len(get_all_user_ids())
+    preview = broadcast_msg[:80] + ("..." if len(broadcast_msg) > 80 else "")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📤 直接发送（无按钮）", callback_data="broadcast_send_no_buttons"),
+            InlineKeyboardButton(text="🔘 添加按钮后发送", callback_data="add_broadcast_buttons")
+        ],
+        [InlineKeyboardButton(text="❌ 取消广播", callback_data="cancel_broadcast")]
+    ])
+    await message.reply(
+        f"📢 广播内容已收到：\n\n{preview}\n\n📊 预计发送给 {user_count} 名用户\n\n是否添加按钮？",
+        reply_markup=kb
+    )
+    logger.info(f"✅ 管理员 {message.from_user.id} 输入广播消息，等待选择是否添加按钮")
+
+
+# ==================== FSM: 等待广播按钮输入 ====================
+@router.message(StateFilter(AdminStates.waiting_broadcast_buttons))
+async def process_broadcast_buttons_input(message: Message, state: FSMContext):
+    """处理管理员输入的广播按钮列表，随后发送广播"""
+    from config import ADMIN_IDS
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    buttons_text = message.text.strip() if message.text else ""
+    data = await state.get_data()
+    broadcast_msg = data.get("broadcast_msg", "")
+    await state.clear()
+
+    if not buttons_text:
+        await message.reply("❌ 未收到按钮内容，操作已取消")
+        return
+
+    buttons = parse_buttons_text(buttons_text)
+    if not buttons:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply(
+            "❌ 未能解析有效按钮\n\n格式示例：\n了解更多|https://example.com",
+            reply_markup=kb
+        )
+        return
+
+    await _do_broadcast(message, broadcast_msg, buttons)
+
+
+async def _do_broadcast(message: Message, text: str, buttons: list = None):
+    """执行广播：向所有注册用户发送消息"""
+    user_ids = get_all_user_ids()
+    if not user_ids:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply("❌ 暂无注册用户记录，无法广播", reply_markup=kb)
+        return
+
+    kb = None
+    if buttons:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons]
+        )
+
+    status_msg = await message.reply(f"📤 正在向 {len(user_ids)} 名用户发送广播...")
+
+    success_count = 0
+    fail_count = 0
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, text, reply_markup=kb)
+            success_count += 1
+        except Exception as e:
+            fail_count += 1
+            logger.debug(f"广播发送给用户 {uid} 失败: {e}")
+
+    kb_back = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+    ])
+    result_text = (
+        f"✅ 广播完成！\n\n"
+        f"📊 统计：\n"
+        f"• 成功：{success_count} 人\n"
+        f"• 失败：{fail_count} 人\n"
+        f"• 总计：{len(user_ids)} 人"
+    )
+    try:
+        await bot.edit_message_text(result_text, message.chat.id, status_msg.message_id, reply_markup=kb_back)
+    except Exception:
+        await message.reply(result_text, reply_markup=kb_back)
+    logger.info(f"📢 广播完成：成功 {success_count}，失败 {fail_count}")
+
+
 
 
 # ==================== FSM: 等待教师名称输入 ====================
@@ -723,6 +924,7 @@ async def process_teacher_name_input(message: Message, state: FSMContext):
         return
 
     stats = get_teacher_stats(teacher_name)
+    teacher_info = get_teacher_info(teacher_name)
 
     if stats["total"] == 0:
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -734,22 +936,65 @@ async def process_teacher_name_input(message: Message, state: FSMContext):
 
     recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
 
+    nickname_line = f"\n📛 昵称：{teacher_info['nickname']}" if teacher_info["nickname"] else ""
+    id_line = f"\n🆔 ID：{teacher_info['teacher_id']}" if teacher_info["teacher_id"] else ""
+
     manage_text = f"""👨‍🏫 教师数据管理
 
-教师: @{teacher_name}
+━━━━━━━━━━━━━━━━━━━
+📌 教师：@{teacher_name}{nickname_line}{id_line}
+━━━━━━━━━━━━━━━━━━━
 
-📊 统计信息:
-• 总评价数: {stats['total']}
-• 👍 推荐: {stats['recommend']} 人 ({recommend_percentage}%)
-• 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
+📊 统计信息：
+• 总评价数：{stats['total']}
+• 👍 推荐：{stats['recommend']} 人（{recommend_percentage}%）
+• 👎 不推荐：{stats['not_recommend']} 人（{100-recommend_percentage}%）
 
-⚠️ 注意: 删除操作不可恢复"""
+⚠️ 注意：删除操作不可恢复"""
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 查看所有评价", callback_data=f"view_teacher_ratings|{teacher_name}")],
+        [InlineKeyboardButton(text="✏️ 设置昵称/ID", callback_data=f"set_teacher_info|{teacher_name}")],
         [InlineKeyboardButton(text="🗑️ 删除该教师全部数据", callback_data=f"delete_all_teacher|{teacher_name}")],
         [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
     ])
 
     await message.reply(manage_text, reply_markup=kb)
     logger.info(f"✅ 管理员 {message.from_user.id} 通过交互式方式管理教师 @{teacher_name}")
+
+
+# ==================== FSM: 等待教师昵称/ID 输入 ====================
+@router.message(StateFilter(AdminStates.waiting_teacher_info))
+async def process_teacher_info_input(message: Message, state: FSMContext):
+    """处理管理员输入的教师昵称和ID（格式: 昵称|ID）"""
+    from config import ADMIN_IDS
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    info_text = message.text.strip() if message.text else ""
+    data = await state.get_data()
+    teacher_name = data.get("teacher_name", "")
+    await state.clear()
+
+    if not info_text or not teacher_name:
+        await message.reply("❌ 未收到有效内容，操作已取消")
+        return
+
+    # 解析格式: 昵称|ID
+    parts = info_text.split("|", 1)
+    nickname = parts[0].strip()
+    teacher_id = parts[1].strip() if len(parts) > 1 else ""
+
+    set_teacher_info(teacher_name, nickname, teacher_id)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+    ])
+    id_part = f"\n🆔 ID：{teacher_id}" if teacher_id else ""
+    await message.reply(
+        f"✅ 教师信息已更新！\n\n📌 @{teacher_name}\n📛 昵称：{nickname}{id_part}",
+        reply_markup=kb
+    )
+    logger.info(f"✅ 管理员 {message.from_user.id} 设置教师 @{teacher_name} 昵称/ID")
+
