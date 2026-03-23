@@ -3,6 +3,7 @@
 群组处理模块
 """
 
+import asyncio
 import logging
 import re
 from aiogram import Router
@@ -12,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from database import get_teacher_stats, get_teacher_info
 from states import RatingStates
 from bot_instance import bot
-from utils.helpers import fetch_tg_teacher_info
+from utils.helpers import fetch_tg_teacher_info, auto_delete_message
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -98,8 +99,10 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
             ]
         ])
         
-        await message.reply(display_text, reply_markup=kb)
+        sent = await message.reply(display_text, reply_markup=kb)
+        asyncio.create_task(auto_delete_message(sent))
         
     except Exception as e:
         logger.error(f"处理教师提及时出错: {e}")
-        await message.reply(f"❌ 出错: {str(e)}")
+        sent_err = await message.reply(f"❌ 出错: {str(e)}")
+        asyncio.create_task(auto_delete_message(sent_err))

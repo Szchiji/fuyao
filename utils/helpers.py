@@ -1,10 +1,22 @@
 # utils/helpers.py
+import asyncio
 import logging
 from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database import get_teacher_detail, get_user_by_username
 
 logger = logging.getLogger(__name__)
+
+AUTO_DELETE_DELAY = 300  # 5 分钟（秒）
+
+
+async def auto_delete_message(message: Message, delay: int = AUTO_DELETE_DELAY):
+    """在指定时间（秒）后自动删除消息"""
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"自动删除消息失败: {e}")
 
 
 async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid: str):
