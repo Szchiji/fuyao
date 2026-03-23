@@ -32,7 +32,8 @@ from database import (
     add_to_blacklist,
     remove_from_blacklist,
     is_user_blacklisted,
-    get_all_blacklisted_users
+    get_all_blacklisted_users,
+    get_auto_delete_delay
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
@@ -698,6 +699,36 @@ A: 可以用别账号""", reply_markup=kb)
 • 示例: <b>欢迎使用教师评价机器人！</b>
 
 直接发送欢迎语内容即可：""",
+                reply_markup=kb
+            )
+            return
+
+        if data == "admin_set_auto_delete":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            await state.set_state(AdminStates.waiting_auto_delete_delay)
+            await callback.answer()
+
+            current = get_auto_delete_delay()
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
+            ])
+            from handlers.admin import _format_delay
+            await callback.message.edit_text(
+                f"""⏱️ 设置自动删除时间
+
+当前设置：{_format_delay(current)}
+
+请发送新的删除时间（单位：秒）：
+
+💡 示例：
+• 600（10 分钟）
+• 300（5 分钟）
+• 1800（30 分钟）
+
+直接发送秒数即可：""",
                 reply_markup=kb
             )
             return

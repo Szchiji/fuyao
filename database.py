@@ -446,6 +446,40 @@ def get_start_buttons() -> list:
         return []
 
 
+DEFAULT_AUTO_DELETE_DELAY = 600  # 默认 10 分钟（秒）
+
+
+def set_auto_delete_delay(seconds: int) -> None:
+    """设置群内消息自动删除时间（秒）"""
+    try:
+        value = str(int(seconds))
+        _db.upsert(
+            "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s",
+            ("auto_delete_delay", value, value),
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            ("auto_delete_delay", value)
+        )
+        logger.info(f"✅ 自动删除时间已设置为 {seconds} 秒")
+    except Exception as e:
+        logger.error(f"设置自动删除时间失败: {e}")
+
+
+def get_auto_delete_delay() -> int:
+    """获取群内消息自动删除时间（秒），默认 10 分钟"""
+    try:
+        result = _db.query_one(
+            "SELECT value FROM settings WHERE key = %s",
+            "SELECT value FROM settings WHERE key = ?",
+            ("auto_delete_delay",)
+        )
+        if result and result[0]:
+            return int(result[0])
+        return DEFAULT_AUTO_DELETE_DELAY
+    except Exception as e:
+        logger.error(f"获取自动删除时间失败: {e}")
+        return DEFAULT_AUTO_DELETE_DELAY
+
+
 def record_user(user_id: int, username: str = "", first_name: str = "") -> None:
     """记录使用过机器人的用户（用于广播）"""
     try:

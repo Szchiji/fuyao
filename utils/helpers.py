@@ -3,15 +3,15 @@ import asyncio
 import logging
 from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from database import get_teacher_detail, get_user_by_username
+from database import get_teacher_detail, get_user_by_username, get_auto_delete_delay
 
 logger = logging.getLogger(__name__)
 
-AUTO_DELETE_DELAY = 300  # 5 分钟（秒）
 
-
-async def auto_delete_message(message: Message, delay: int = AUTO_DELETE_DELAY):
-    """在指定时间（秒）后自动删除消息"""
+async def auto_delete_message(message: Message, delay: int = None):
+    """在指定时间（秒）后自动删除消息。delay 为 None 时从数据库读取配置值"""
+    if delay is None:
+        delay = get_auto_delete_delay()
     await asyncio.sleep(delay)
     try:
         await message.delete()
