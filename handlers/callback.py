@@ -30,7 +30,7 @@ from database import (
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
-from utils.helpers import format_leaderboard_text
+from utils.helpers import format_leaderboard_text, fetch_tg_teacher_info
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -1189,11 +1189,15 @@ ID: <code>{user_id}</code>
 
             nickname = teacher_info.get("nickname", "")
             tid = teacher_info.get("teacher_id", "")
+
+            # 若昵称或ID未在数据库中设置，尝试从 Telegram 获取
+            nickname, tid = await fetch_tg_teacher_info(bot, teacher_name, nickname, tid)
+
             header = f"📋 @{teacher_name}"
             if nickname:
-                header += f"（{nickname}）"
+                header += f"\n📛 昵称：{nickname}"
             if tid:
-                header += f" · ID: {tid}"
+                header += f"\n🆔 ID：{tid}"
 
             offset = page * per_page
             text = f"{header} 的评价\n\n"
