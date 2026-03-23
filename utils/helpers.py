@@ -9,20 +9,16 @@ logger = logging.getLogger(__name__)
 
 async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid: str):
     """
-    若昵称或 ID 未在数据库中设置，尝试通过 Telegram API 获取。
-    返回 (nickname, tid) 元组，值不变或填充自 Telegram。
+    通过 Telegram API 获取昵称和 ID，优先使用 Telegram 实时数据。
+    若 API 获取失败则回退到传入的数值。
     """
-    if nickname and tid:
-        return nickname, tid
     try:
         tg_chat = await bot.get_chat(f"@{teacher_name}")
-        if not nickname:
-            full_name = tg_chat.first_name or ""
-            if getattr(tg_chat, "last_name", None):
-                full_name = f"{full_name} {tg_chat.last_name}".strip()
-            nickname = full_name
-        if not tid:
-            tid = str(tg_chat.id)
+        full_name = tg_chat.first_name or ""
+        if getattr(tg_chat, "last_name", None):
+            full_name = f"{full_name} {tg_chat.last_name}".strip()
+        nickname = full_name or nickname
+        tid = str(tg_chat.id) if tg_chat.id else tid
     except Exception as e:
         logger.debug(f"从 Telegram 获取 @{teacher_name} 信息失败: {e}")
     return nickname, tid
