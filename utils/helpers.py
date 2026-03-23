@@ -2,7 +2,7 @@
 import logging
 from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from database import get_teacher_detail
+from database import get_teacher_detail, get_user_by_username
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid: str):
     """
     通过 Telegram API 获取昵称和 ID，优先使用 Telegram 实时数据。
-    若 API 获取失败则回退到传入的数值。
+    若 API 获取失败则回退到 users 表中已存储的用户信息，最后才使用传入的数值。
     """
     try:
         tg_chat = await bot.get_chat(f"@{teacher_name}")
@@ -21,6 +21,11 @@ async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid:
         tid = str(tg_chat.id) if tg_chat.id else tid
     except Exception as e:
         logger.debug(f"从 Telegram 获取 @{teacher_name} 信息失败: {e}")
+        # 回退：从 users 表查找曾与机器人互动过的同名用户
+        user_row = get_user_by_username(teacher_name)
+        if user_row:
+            nickname = nickname or user_row.get("first_name", "")
+            tid = tid or str(user_row.get("user_id", ""))
     return nickname, tid
 
 async def send_teacher_detail(message: Message, teacher: str, edit_msg_id=None):

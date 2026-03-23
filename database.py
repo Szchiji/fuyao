@@ -569,6 +569,32 @@ def get_all_user_ids() -> list:
         return []
 
 
+def get_user_by_username(username: str) -> dict:
+    """通过用户名从 users 表查找用户的 user_id 和 first_name（用于回退显示昵称/ID）"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if USE_POSTGRES:
+            cursor.execute(
+                "SELECT user_id, first_name FROM users WHERE LOWER(username) = LOWER(%s)",
+                (username,)
+            )
+        else:
+            cursor.execute(
+                "SELECT user_id, first_name FROM users WHERE LOWER(username) = LOWER(?)",
+                (username,)
+            )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            # row[0] = user_id, row[1] = first_name (matches SELECT order)
+            return {"user_id": row[0], "first_name": row[1] or ""}
+        return {}
+    except Exception as e:
+        logger.error(f"通过用户名查询用户失败: {e}")
+        return {}
+
+
 def set_teacher_info(name: str, nickname: str = "", teacher_id: str = ""):
     """设置教师昵称和ID"""
     try:
