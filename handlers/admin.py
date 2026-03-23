@@ -27,7 +27,9 @@ from database import (
     add_to_blacklist,
     remove_from_blacklist,
     get_all_blacklisted_users,
-    is_user_blacklisted
+    is_user_blacklisted,
+    set_auto_delete_delay,
+    get_auto_delete_delay
 )
 from utils.decorators import admin_only
 from bot_instance import bot
@@ -46,6 +48,16 @@ logger.info(f"📝 admin_router 已创建，管理员数: {len(ADMIN_IDS)}")
 logger.info(f"📝 管理员 ID 列表: {ADMIN_IDS}")
 
 MAX_BUTTON_COUNT = 5  # 欢迎语/广播最多支持的按钮数
+
+
+def _format_delay(seconds: int) -> str:
+    """将秒数格式化为可读的时间字符串（如 10 分钟 30 秒）"""
+    mins, secs = divmod(seconds, 60)
+    if mins and secs:
+        return f"{seconds} 秒（{mins} 分钟 {secs} 秒）"
+    if mins:
+        return f"{seconds} 秒（{mins} 分钟）"
+    return f"{seconds} 秒"
 
 
 def parse_buttons_text(text: str) -> list:
@@ -79,13 +91,14 @@ def build_admin_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="✏️ 设置欢迎语", callback_data="admin_set_welcome"),
-            InlineKeyboardButton(text="👨‍🏫 管理教师", callback_data="admin_manage_teacher")
+            InlineKeyboardButton(text="⏱️ 设置删除时间", callback_data="admin_set_auto_delete")
         ],
         [
-            InlineKeyboardButton(text="📢 广播消息", callback_data="admin_broadcast"),
-            InlineKeyboardButton(text="🚫 黑名单管理", callback_data="admin_blacklist")
+            InlineKeyboardButton(text="👨‍🏫 管理教师", callback_data="admin_manage_teacher"),
+            InlineKeyboardButton(text="📢 广播消息", callback_data="admin_broadcast")
         ],
         [
+            InlineKeyboardButton(text="🚫 黑名单管理", callback_data="admin_blacklist"),
             InlineKeyboardButton(text="📖 管理帮助", callback_data="admin_help")
         ]
     ])
@@ -687,6 +700,44 @@ async def cancel_operation(message: Message, state: FSMContext):
     logger.info(f"✅ 管理员 {message.from_user.id} 取消了操作")
 
 
+# ==================== /设置删除时间 命令 ====================
+@router.message(Command("设置删除时间"))
+@admin_only
+async def set_auto_delete_time(message: Message, state: FSMContext):
+    """设置群内消息自动删除时间"""
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        current = get_auto_delete_delay()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏱️ 通过菜单设置", callback_data="admin_set_auto_delete")],
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply(
+            f"⏱️ 当前自动删除时间：{_format_delay(current)}\n\n"
+            "用法：/设置删除时间 <秒数>\n"
+            "例如：/设置删除时间 600（10 分钟）",
+            reply_markup=kb
+        )
+        return
+
+    try:
+        seconds = int(parts[1].strip())
+        if seconds < 10:
+            await message.reply("❌ 删除时间不能少于 10 秒")
+            return
+        set_auto_delete_delay(seconds)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply(
+            f"✅ 自动删除时间已设置为 {_format_delay(seconds)}",
+            reply_markup=kb
+        )
+        logger.info(f"✅ 管理员 {message.from_user.id} 将自动删除时间设置为 {seconds} 秒")
+    except ValueError:
+        await message.reply("❌ 请输入有效的秒数\n\n例如：/设置删除时间 600")
+
+
 # ==================== FSM: 等待频道 ID 输入 ====================
 @router.message(StateFilter(AdminStates.waiting_channel_id))
 async def process_channel_id_input(message: Message, state: FSMContext):
@@ -1054,3 +1105,48 @@ async def process_blacklist_user_id_input(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     logger.info(f"管理员 {message.from_user.id} 请求拉黑用户 {target_user_id}")
+
+
+# ==================== FSM: 等待自动删除时间输入 ====================
+@router.message(StateFilter(AdminStates.waiting_auto_delete_delay))
+async def process_auto_delete_delay_input(message: Message, state: FSMContext):
+    """处理管理员输入的自动删除时间"""
+    from config import ADMIN_IDS
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    raw = message.text.strip() if message.text else ""
+    await state.clear()
+
+    if not raw:
+        await message.reply("❌ 未收到有效内容，操作已取消")
+        return
+
+    try:
+        seconds = int(raw)
+    except ValueError:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 重新输入", callback_data="admin_set_auto_delete")],
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply("❌ 请输入有效的秒数（纯数字）", reply_markup=kb)
+        return
+
+    if seconds < 10:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 重新输入", callback_data="admin_set_auto_delete")],
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply("❌ 删除时间不能少于 10 秒", reply_markup=kb)
+        return
+
+    set_auto_delete_delay(seconds)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+    ])
+    await message.reply(
+        f"✅ 自动删除时间已设置为 {_format_delay(seconds)}",
+        reply_markup=kb
+    )
+    logger.info(f"✅ 管理员 {message.from_user.id} 将自动删除时间设置为 {seconds} 秒")

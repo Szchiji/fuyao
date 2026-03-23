@@ -101,6 +101,7 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         
         sent = await message.reply(display_text, reply_markup=kb)
         asyncio.create_task(auto_delete_message(sent))
+        asyncio.create_task(auto_delete_message(message))
         
     except Exception as e:
         logger.error(f"处理教师提及时出错: {e}")
