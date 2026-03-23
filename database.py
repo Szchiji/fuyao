@@ -55,6 +55,7 @@ def get_connection():
 
 def init_db():
     """初始化数据库"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -174,7 +175,6 @@ def init_db():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
         
         conn.commit()
-        conn.close()
         
         db_info = "PostgreSQL" if USE_POSTGRES else "SQLite"
         logger.info(f"✅ {db_info} 数据库初始化成功")
@@ -183,9 +183,13 @@ def init_db():
         logger.error(f"❌ 数据库初始化失败: {e}")
         raise
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def check_user_rated_teacher(teacher: str, user_id: int) -> bool:
     """检查用户是否已评价该教师"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -196,13 +200,15 @@ def check_user_rated_teacher(teacher: str, user_id: int) -> bool:
             cursor.execute("SELECT id FROM recs WHERE teacher = ? AND user_id = ?", (teacher, user_id))
         
         result = cursor.fetchone()
-        conn.close()
         
         return result is not None
     except Exception as e:
         logger.error(f"检查评价记录时出错: {e}")
         return False
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> dict:
     """添加评价"""
@@ -218,6 +224,7 @@ def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> d
             "msg": f"❌ 您已经评价过 @{teacher} 了\n\n每个教师只能评价一次"
         }
     
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -234,7 +241,6 @@ def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> d
             )
         
         conn.commit()
-        conn.close()
         
         logger.info(f"✅ 用户 {user_id} 成功评价了 {teacher}")
         return {
@@ -249,9 +255,13 @@ def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> d
             "msg": f"❌ 提交失败: {str(e)}"
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_teacher_stats(teacher: str) -> dict:
     """获取教师的评价统计"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -287,7 +297,6 @@ def get_teacher_stats(teacher: str) -> dict:
             )
             latest = cursor.fetchall()
         
-        conn.close()
         
         return {
             "teacher": teacher,
@@ -306,9 +315,13 @@ def get_teacher_stats(teacher: str) -> dict:
             "latest": []
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_global_stats() -> dict:
     """获取全局统计"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -334,7 +347,6 @@ def get_global_stats() -> dict:
             cursor.execute("SELECT COUNT(*) FROM recs WHERE DATE(time) = ?", (today,))
             today_count = cursor.fetchone()[0]
         
-        conn.close()
         
         return {
             "total_eval": total_eval,
@@ -349,9 +361,13 @@ def get_global_stats() -> dict:
             "today": 0
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def add_required_channel(channel_id: str) -> dict:
     """添加频道要求"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -362,7 +378,6 @@ def add_required_channel(channel_id: str) -> dict:
                 (f"channel_{channel_id}",)
             )
             if cursor.fetchone():
-                conn.close()
                 logger.warning(f"⚠️ 频道 {channel_id} 已添加过了")
                 return {
                     "success": False,
@@ -379,7 +394,6 @@ def add_required_channel(channel_id: str) -> dict:
                 (f"channel_{channel_id}",)
             )
             if cursor.fetchone():
-                conn.close()
                 logger.warning(f"⚠️ 频道 {channel_id} 已添加过了")
                 return {
                     "success": False,
@@ -392,7 +406,6 @@ def add_required_channel(channel_id: str) -> dict:
             )
         
         conn.commit()
-        conn.close()
         logger.info(f"✅ 频道已添加: {channel_id}")
         return {
             "success": True,
@@ -405,9 +418,13 @@ def add_required_channel(channel_id: str) -> dict:
             "msg": f"❌ 添加频道失败: {str(e)}"
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_all_required_channels() -> list:
     """获取所有频道要求"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -418,7 +435,6 @@ def get_all_required_channels() -> list:
             cursor.execute("SELECT value FROM settings WHERE key LIKE ?", ('channel_%',))
         
         results = cursor.fetchall()
-        conn.close()
         
         channels = [r[0] for r in results] if results else []
         logger.info(f"📋 获取到 {len(channels)} 个频道: {channels}")
@@ -427,9 +443,13 @@ def get_all_required_channels() -> list:
         logger.error(f"获取频道列表失败: {e}")
         return []
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def remove_required_channel(channel_id: str) -> dict:
     """移除频道要求"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -446,7 +466,6 @@ def remove_required_channel(channel_id: str) -> dict:
             )
         
         conn.commit()
-        conn.close()
         logger.info(f"✅ 频道已移除: {channel_id}")
         return {
             "success": True,
@@ -459,9 +478,13 @@ def remove_required_channel(channel_id: str) -> dict:
             "msg": f"❌ 移除频道失败: {str(e)}"
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def set_start_message(message: str):
     """设置欢迎语"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -478,14 +501,17 @@ def set_start_message(message: str):
             )
         
         conn.commit()
-        conn.close()
         logger.info("✅ 欢迎语已设置")
     except Exception as e:
         logger.error(f"设置欢迎语失败: {e}")
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_start_message(default: str = "") -> str:
     """获取欢迎语"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -496,17 +522,20 @@ def get_start_message(default: str = "") -> str:
             cursor.execute("SELECT value FROM settings WHERE key = ?", ("start_message",))
         
         result = cursor.fetchone()
-        conn.close()
         
         return result[0] if result else default
     except Exception as e:
         logger.error(f"获取欢迎语失败: {e}")
         return default
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def set_start_buttons(buttons: list):
     """保存欢迎语按钮（列表形式 [{"text": ..., "url": ...}, ...]）"""
     import json
+    conn = None
     try:
         value = json.dumps(buttons, ensure_ascii=False)
         conn = get_connection()
@@ -522,15 +551,18 @@ def set_start_buttons(buttons: list):
                 ("start_message_buttons", value)
             )
         conn.commit()
-        conn.close()
         logger.info(f"✅ 欢迎语按钮已保存，共 {len(buttons)} 个")
     except Exception as e:
         logger.error(f"保存欢迎语按钮失败: {e}")
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_start_buttons() -> list:
     """获取欢迎语按钮列表"""
     import json
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -539,7 +571,6 @@ def get_start_buttons() -> list:
         else:
             cursor.execute("SELECT value FROM settings WHERE key = ?", ("start_message_buttons",))
         result = cursor.fetchone()
-        conn.close()
         if result and result[0]:
             return json.loads(result[0])
         return []
@@ -547,9 +578,13 @@ def get_start_buttons() -> list:
         logger.error(f"获取欢迎语按钮失败: {e}")
         return []
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def record_user(user_id: int, username: str = "", first_name: str = ""):
     """记录使用过机器人的用户（用于广播）"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -568,27 +603,33 @@ def record_user(user_id: int, username: str = "", first_name: str = ""):
                 (user_id, uname, fname)
             )
         conn.commit()
-        conn.close()
     except Exception as e:
         logger.error(f"记录用户失败: {e}")
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_all_user_ids() -> list:
     """获取所有曾使用过机器人的用户 ID"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users")
         rows = cursor.fetchall()
-        conn.close()
         return [r[0] for r in rows]
     except Exception as e:
         logger.error(f"获取用户列表失败: {e}")
         return []
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_user_by_username(username: str) -> dict:
     """通过用户名从 users 表查找用户的 user_id 和 first_name（用于回退显示昵称/ID）"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -603,7 +644,6 @@ def get_user_by_username(username: str) -> dict:
                 (username,)
             )
         row = cursor.fetchone()
-        conn.close()
         if row:
             # row[0] = user_id, row[1] = first_name (matches SELECT order)
             return {"user_id": row[0], "first_name": row[1] or ""}
@@ -612,9 +652,13 @@ def get_user_by_username(username: str) -> dict:
         logger.error(f"通过用户名查询用户失败: {e}")
         return {}
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def set_teacher_info(name: str, nickname: str = "", teacher_id: str = ""):
     """设置教师昵称和ID"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -631,14 +675,17 @@ def set_teacher_info(name: str, nickname: str = "", teacher_id: str = ""):
                 (name, nickname, teacher_id)
             )
         conn.commit()
-        conn.close()
         logger.info(f"✅ 教师 @{name} 信息已更新")
     except Exception as e:
         logger.error(f"设置教师信息失败: {e}")
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_teacher_info(name: str) -> dict:
     """获取教师昵称和ID，未设置则返回空字符串"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -647,7 +694,6 @@ def get_teacher_info(name: str) -> dict:
         else:
             cursor.execute("SELECT nickname, teacher_id FROM teachers WHERE name = ?", (name,))
         row = cursor.fetchone()
-        conn.close()
         if row:
             return {"nickname": row[0] or "", "teacher_id": row[1] or ""}
         return {"nickname": "", "teacher_id": ""}
@@ -655,9 +701,13 @@ def get_teacher_info(name: str) -> dict:
         logger.error(f"获取教师信息失败: {e}")
         return {"nickname": "", "teacher_id": ""}
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_teacher_reviews_page(teacher: str, page: int = 0, per_page: int = 5) -> list:
     """分页获取教师评价（用于"更多评价"按钮）"""
+    conn = None
     try:
         offset = page * per_page
         conn = get_connection()
@@ -675,12 +725,14 @@ def get_teacher_reviews_page(teacher: str, page: int = 0, per_page: int = 5) -> 
                 (teacher, per_page, offset)
             )
         rows = cursor.fetchall()
-        conn.close()
         return rows if rows else []
     except Exception as e:
         logger.error(f"分页获取教师评价失败: {e}")
         return []
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_encourage() -> str:
     """获取随机鼓励语"""
@@ -708,6 +760,7 @@ def delete_teacher_data_from_db(teacher: str) -> dict:
     Returns:
         删除结果
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -727,7 +780,6 @@ def delete_teacher_data_from_db(teacher: str) -> dict:
             cursor.execute("DELETE FROM recs WHERE teacher = ?", (teacher,))
         
         conn.commit()
-        conn.close()
         
         logger.warning(f"🗑️ 已删除教师 @{teacher} 的 {total} 条评价数据")
         
@@ -748,6 +800,9 @@ def delete_teacher_data_from_db(teacher: str) -> dict:
             "msg": f"❌ 删除失败: {str(e)}"
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def delete_user_rating(teacher: str, user_id: int) -> dict:
     """
@@ -760,6 +815,7 @@ def delete_user_rating(teacher: str, user_id: int) -> dict:
     Returns:
         删除结果
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -776,7 +832,6 @@ def delete_user_rating(teacher: str, user_id: int) -> dict:
             )
         
         conn.commit()
-        conn.close()
         
         logger.warning(f"🗑️ 已删除用户 {user_id} 对教师 @{teacher} 的评价")
         
@@ -792,6 +847,9 @@ def delete_user_rating(teacher: str, user_id: int) -> dict:
             "msg": f"❌ 删除失败: {str(e)}"
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_teacher_detail(teacher: str):
     """
@@ -803,6 +861,7 @@ def get_teacher_detail(teacher: str):
     Returns:
         dict with keys 'yes', 'no', 'reasons', or None if no records exist
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -812,7 +871,6 @@ def get_teacher_detail(teacher: str):
             total = cursor.fetchone()[0]
 
             if total == 0:
-                conn.close()
                 return None
 
             cursor.execute(
@@ -834,7 +892,6 @@ def get_teacher_detail(teacher: str):
             total = cursor.fetchone()[0]
 
             if total == 0:
-                conn.close()
                 return None
 
             cursor.execute(
@@ -852,7 +909,6 @@ def get_teacher_detail(teacher: str):
             )
             reasons = [row[0] for row in cursor.fetchall()]
 
-        conn.close()
 
         return {
             "yes": yes_count,
@@ -864,6 +920,9 @@ def get_teacher_detail(teacher: str):
         logger.error(f"获取教师详情失败: {e}")
         return None
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_teacher_all_ratings(teacher: str) -> list:
     """
@@ -875,6 +934,7 @@ def get_teacher_all_ratings(teacher: str) -> list:
     Returns:
         评价列表
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -891,7 +951,6 @@ def get_teacher_all_ratings(teacher: str) -> list:
             )
         
         results = cursor.fetchall()
-        conn.close()
         
         return results if results else []
     
@@ -899,6 +958,9 @@ def get_teacher_all_ratings(teacher: str) -> list:
         logger.error(f"获取教师评价失败: {e}")
         return []
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_leaderboard(limit: int = 10) -> list:
     """
@@ -910,6 +972,7 @@ def get_leaderboard(limit: int = 10) -> list:
     Returns:
         列表，每项为 dict: teacher, total, recommend, not_recommend, recommend_pct
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -944,7 +1007,6 @@ def get_leaderboard(limit: int = 10) -> list:
             )
 
         rows = cursor.fetchall()
-        conn.close()
 
         result = []
         for row in rows:
@@ -965,9 +1027,13 @@ def get_leaderboard(limit: int = 10) -> list:
         logger.error(f"获取排行榜失败: {e}")
         return []
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
     """删除指定 ID 的评价"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -978,7 +1044,6 @@ def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
             cursor.execute("DELETE FROM recs WHERE id = ? AND teacher = ?", (int(rating_id), teacher))
         
         conn.commit()
-        conn.close()
         
         logger.warning(f"🗑️ 删除了评价 ID: {rating_id}")
         
@@ -993,10 +1058,14 @@ def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
             "msg": f"❌ 删除失败: {str(e)}"
         }
 
+    finally:
+        if conn is not None:
+            conn.close()
 # ==================== 黑名单管理 ====================
 
 def add_to_blacklist(user_id: int, reason: str = "") -> dict:
     """将用户加入黑名单"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -1013,16 +1082,19 @@ def add_to_blacklist(user_id: int, reason: str = "") -> dict:
                 (user_id, reason)
             )
         conn.commit()
-        conn.close()
         logger.warning(f"🚫 用户 {user_id} 已被加入黑名单，原因：{reason}")
         return {"success": True, "msg": f"✅ 用户 {user_id} 已被加入黑名单"}
     except Exception as e:
         logger.error(f"加入黑名单失败: {e}")
         return {"success": False, "msg": f"❌ 操作失败: {str(e)}"}
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def remove_from_blacklist(user_id: int) -> dict:
     """将用户从黑名单中移除"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -1031,16 +1103,19 @@ def remove_from_blacklist(user_id: int) -> dict:
         else:
             cursor.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
         conn.commit()
-        conn.close()
         logger.info(f"✅ 用户 {user_id} 已从黑名单中移除")
         return {"success": True, "msg": f"✅ 用户 {user_id} 已从黑名单中移除"}
     except Exception as e:
         logger.error(f"移除黑名单失败: {e}")
         return {"success": False, "msg": f"❌ 操作失败: {str(e)}"}
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def is_user_blacklisted(user_id: int) -> bool:
     """检查用户是否在黑名单中"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -1049,22 +1124,28 @@ def is_user_blacklisted(user_id: int) -> bool:
         else:
             cursor.execute("SELECT user_id FROM blacklist WHERE user_id = ?", (user_id,))
         result = cursor.fetchone()
-        conn.close()
         return result is not None
     except Exception as e:
         logger.error(f"检查黑名单失败: {e}")
         return False
 
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_all_blacklisted_users() -> list:
     """获取所有黑名单用户"""
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT user_id, reason, banned_at FROM blacklist ORDER BY banned_at DESC")
         rows = cursor.fetchall()
-        conn.close()
         return [{"user_id": r[0], "reason": r[1] or "", "banned_at": str(r[2])[:19] if r[2] else ""} for r in rows]
     except Exception as e:
         logger.error(f"获取黑名单失败: {e}")
         return []
+
+    finally:
+        if conn is not None:
+            conn.close()
