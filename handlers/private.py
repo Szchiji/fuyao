@@ -4,6 +4,7 @@
 包含: /start, /help, /myid 命令，以及 @teacher_name 群组处理
 """
 
+import asyncio
 import logging
 import re
 from aiogram import Router, F
@@ -21,7 +22,7 @@ from database import (
 )
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
-from utils.helpers import format_leaderboard_text, fetch_tg_teacher_info
+from utils.helpers import format_leaderboard_text, fetch_tg_teacher_info, auto_delete_message
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -495,8 +496,13 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
         
-        await message.reply(display_text, reply_markup=kb)
+        sent = await message.reply(display_text, reply_markup=kb)
         logger.info(f"✅ 显示 @{teacher_name} 的评价信息")
+
+        # 在群组中自动删除机器人回复和原始消息
+        if message.chat.type != "private":
+            asyncio.create_task(auto_delete_message(sent))
+            asyncio.create_task(auto_delete_message(message))
         
     except Exception as e:
         logger.error(f"处理教师提及时出错: {e}", exc_info=True)
