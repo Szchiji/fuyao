@@ -33,7 +33,9 @@ from database import (
     remove_from_blacklist,
     is_user_blacklisted,
     get_all_blacklisted_users,
-    get_auto_delete_delay
+    get_auto_delete_delay,
+    set_delete_user_messages,
+    get_delete_user_messages
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
@@ -712,14 +714,19 @@ A: 可以用别账号""", reply_markup=kb)
             await callback.answer()
 
             current = get_auto_delete_delay()
+            delete_user = get_delete_user_messages()
+            toggle_text = "🟢 开启" if delete_user else "🔴 关闭"
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
+                [InlineKeyboardButton(text=f"🗑️ 删除用户消息：{toggle_text}", callback_data="admin_toggle_delete_user_msg")],
+                [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")],
+                [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
             ])
             from handlers.admin import _format_delay
             await callback.message.edit_text(
                 f"""⏱️ 设置自动删除时间
 
 当前设置：{_format_delay(current)}
+🗑️ 删除用户消息：{toggle_text}
 
 请发送新的删除时间（单位：秒）：
 
@@ -729,6 +736,31 @@ A: 可以用别账号""", reply_markup=kb)
 • 1800（30 分钟）
 
 直接发送秒数即可：""",
+                reply_markup=kb
+            )
+            return
+
+        if data == "admin_toggle_delete_user_msg":
+            if not _is_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            current_val = get_delete_user_messages()
+            new_val = not current_val
+            set_delete_user_messages(new_val)
+            toggle_text = "🟢 开启" if new_val else "🔴 关闭"
+            await callback.answer(f"🗑️ 删除用户消息已{('开启' if new_val else '关闭')}", show_alert=False)
+
+            delay = get_auto_delete_delay()
+            from handlers.admin import _format_delay
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"🗑️ 删除用户消息：{toggle_text}", callback_data="admin_toggle_delete_user_msg")],
+                [InlineKeyboardButton(text="⏱️ 修改删除时间", callback_data="admin_set_auto_delete")],
+                [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+            ])
+            await callback.message.edit_text(
+                f"⏱️ 自动删除时间：{_format_delay(delay)}\n"
+                f"🗑️ 删除用户消息：{toggle_text}",
                 reply_markup=kb
             )
             return

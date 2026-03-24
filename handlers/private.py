@@ -18,7 +18,8 @@ from database import (
     get_teacher_stats,
     get_leaderboard,
     record_user,
-    get_teacher_info
+    get_teacher_info,
+    get_delete_user_messages
 )
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
@@ -502,7 +503,8 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         # 在群组中自动删除机器人回复和原始消息
         if message.chat.type != "private":
             asyncio.create_task(auto_delete_message(sent))
-            asyncio.create_task(auto_delete_message(message))
+            if get_delete_user_messages():
+                asyncio.create_task(auto_delete_message(message))
         
     except Exception as e:
         logger.error(f"处理教师提及时出错: {e}", exc_info=True)

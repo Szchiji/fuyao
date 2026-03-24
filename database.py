@@ -482,6 +482,37 @@ def get_auto_delete_delay() -> int:
         return DEFAULT_AUTO_DELETE_DELAY
 
 
+def set_delete_user_messages(enabled: bool) -> None:
+    """设置是否自动删除用户发出的消息"""
+    try:
+        value = "1" if enabled else "0"
+        _db.upsert(
+            "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s",
+            ("delete_user_messages", value, value),
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            ("delete_user_messages", value)
+        )
+        logger.info(f"✅ 删除用户消息设置为: {'开启' if enabled else '关闭'}")
+    except Exception as e:
+        logger.error(f"设置删除用户消息失败: {e}")
+
+
+def get_delete_user_messages() -> bool:
+    """获取是否自动删除用户发出的消息（默认开启）"""
+    try:
+        result = _db.query_one(
+            "SELECT value FROM settings WHERE key = %s",
+            "SELECT value FROM settings WHERE key = ?",
+            ("delete_user_messages",)
+        )
+        if result and result[0] is not None:
+            return result[0] == "1"
+        return True  # 默认开启
+    except Exception as e:
+        logger.error(f"获取删除用户消息设置失败: {e}")
+        return True
+
+
 def record_user(user_id: int, username: str = "", first_name: str = "") -> None:
     """记录使用过机器人的用户（用于广播）"""
     try:

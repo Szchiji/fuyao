@@ -29,7 +29,9 @@ from database import (
     get_all_blacklisted_users,
     is_user_blacklisted,
     set_auto_delete_delay,
-    get_auto_delete_delay
+    get_auto_delete_delay,
+    set_delete_user_messages,
+    get_delete_user_messages
 )
 from utils.decorators import admin_only
 from bot_instance import bot
@@ -708,12 +710,16 @@ async def set_auto_delete_time(message: Message, state: FSMContext):
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         current = get_auto_delete_delay()
+        delete_user = get_delete_user_messages()
+        toggle_text = "🟢 开启" if delete_user else "🔴 关闭"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⏱️ 通过菜单设置", callback_data="admin_set_auto_delete")],
+            [InlineKeyboardButton(text=f"🗑️ 删除用户消息：{toggle_text}", callback_data="admin_toggle_delete_user_msg")],
             [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
         ])
         await message.reply(
-            f"⏱️ 当前自动删除时间：{_format_delay(current)}\n\n"
+            f"⏱️ 当前自动删除时间：{_format_delay(current)}\n"
+            f"🗑️ 删除用户消息：{toggle_text}\n\n"
             "用法：/设置删除时间 <秒数>\n"
             "例如：/设置删除时间 600（10 分钟）",
             reply_markup=kb
@@ -726,11 +732,15 @@ async def set_auto_delete_time(message: Message, state: FSMContext):
             await message.reply("❌ 删除时间不能少于 10 秒")
             return
         set_auto_delete_delay(seconds)
+        delete_user = get_delete_user_messages()
+        toggle_text = "🟢 开启" if delete_user else "🔴 关闭"
         kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"🗑️ 删除用户消息：{toggle_text}", callback_data="admin_toggle_delete_user_msg")],
             [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
         ])
         await message.reply(
-            f"✅ 自动删除时间已设置为 {_format_delay(seconds)}",
+            f"✅ 自动删除时间已设置为 {_format_delay(seconds)}\n"
+            f"🗑️ 删除用户消息：{toggle_text}",
             reply_markup=kb
         )
         logger.info(f"✅ 管理员 {message.from_user.id} 将自动删除时间设置为 {seconds} 秒")
@@ -1142,11 +1152,15 @@ async def process_auto_delete_delay_input(message: Message, state: FSMContext):
         return
 
     set_auto_delete_delay(seconds)
+    delete_user = get_delete_user_messages()
+    toggle_text = "🟢 开启" if delete_user else "🔴 关闭"
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🗑️ 删除用户消息：{toggle_text}", callback_data="admin_toggle_delete_user_msg")],
         [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
     ])
     await message.reply(
-        f"✅ 自动删除时间已设置为 {_format_delay(seconds)}",
+        f"✅ 自动删除时间已设置为 {_format_delay(seconds)}\n"
+        f"🗑️ 删除用户消息：{toggle_text}",
         reply_markup=kb
     )
     logger.info(f"✅ 管理员 {message.from_user.id} 将自动删除时间设置为 {seconds} 秒")
