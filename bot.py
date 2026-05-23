@@ -7,6 +7,7 @@
 import asyncio
 import logging
 import os
+import time
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
@@ -55,12 +56,22 @@ except Exception as e:
     logger.error(f"❌ 加载 private_router 失败: {e}")
     exit(1)
 
-try:
-    init_db()
-    logger.info("✅ 数据库初始化完成")
-except Exception as e:
-    logger.error(f"❌ 数据库初始化失败: {e}")
-    exit(1)
+# 数据库初始化（带重试逻辑，应对服务器崩溃后数据库短暂不可用的情况）
+_DB_INIT_RETRIES = 5
+_DB_INIT_DELAY = 10  # 秒
+for _attempt in range(_DB_INIT_RETRIES):
+    try:
+        init_db()
+        logger.info("✅ 数据库初始化完成")
+        break
+    except Exception as _e:
+        logger.error(f"❌ 数据库初始化失败（尝试 {_attempt + 1}/{_DB_INIT_RETRIES}）: {_e}")
+        if _attempt < _DB_INIT_RETRIES - 1:
+            logger.info(f"⏳ {_DB_INIT_DELAY} 秒后重试...")
+            time.sleep(_DB_INIT_DELAY)
+        else:
+            logger.error("❌ 数据库多次初始化失败，退出")
+            exit(1)
 
 
 # 全局变量
@@ -97,6 +108,25 @@ async def setup_dispatcher():
     logger.info("✅ 黑名单中间件已注册")
 
 
+async def ensure_webhook_deleted(retries: int = 5, delay: float = 5.0) -> bool:
+    """
+    确保 Webhook 已删除，带重试逻辑。
+    服务器崩溃后重启时，若此调用失败则轮询无法正常接收更新，
+    因为 Telegram 仍会向旧 Webhook URL 推送消息。
+    """
+    for attempt in range(retries):
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook 已删除")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ 删除 Webhook 失败（尝试 {attempt + 1}/{retries}）: {e}")
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+    logger.error("❌ 无法删除 Webhook，轮询可能无法正常接收更新")
+    return False
+
+
 async def webhook_handler(request: web.Request) -> web.Response:
     """
     处理来自 Telegram 的 Webhook 请求
@@ -127,7 +157,8 @@ async def polling_task():
             bot,
             allowed_updates=dp.resolve_used_update_types(),
             poll_interval=1.0,
-            timeout=10
+            timeout=10,
+            drop_pending_updates=True,
         )
     except asyncio.CancelledError:
         logger.info("⛔ 轮询备份已停止")
@@ -210,9 +241,8 @@ async def main():
         logger.info(f"🔗 设置 Webhook URL: {webhook_url}")
         
         try:
-            # 移除之前的 Webhook
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("✅ 清除旧 Webhook")
+            # 先确保旧 Webhook 已删除（带重试），避免残留指向旧服务器
+            await ensure_webhook_deleted()
             
             # 设置新 Webhook
             await bot.set_webhook(
@@ -230,16 +260,14 @@ async def main():
             logger.error(f"❌ 设置 Webhook 失败: {e}")
             logger.warning("⚠️ 将回退到轮询模式")
             webhook_mode = False
+            # 确保 Webhook 已删除，否则轮询收不到任何更新
+            await ensure_webhook_deleted()
     else:
         logger.info("💻 开发环境或本地运行 - 禁用 Webhook")
         webhook_mode = False
         
-        try:
-            # 删除 Webhook 以启用轮询
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("✅ 清除 Webhook，启用轮询模式")
-        except Exception as e:
-            logger.warning(f"⚠️ 清除 Webhook 失败: {e}")
+        # 确保 Webhook 已删除（带重试），否则轮询收不到任何更新
+        await ensure_webhook_deleted()
     
     # ==================== 启动轮询（仅在非 Webhook 模式下） ====================
     polling_task_obj = None
