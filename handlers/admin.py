@@ -1164,3 +1164,45 @@ async def process_auto_delete_delay_input(message: Message, state: FSMContext):
         reply_markup=kb
     )
     logger.info(f"✅ 管理员 {message.from_user.id} 将自动删除时间设置为 {seconds} 秒")
+
+
+# ==================== 重置 Webhook（崩溃恢复用） ====================
+@router.message(Command("重置webhook", "reset_webhook"))
+@admin_only
+async def cmd_reset_webhook(message: Message):
+    """手动重置 Webhook，崩溃恢复后若机器人仍无反应可执行此命令"""
+    import os
+    NODE_ENV = os.getenv('NODE_ENV', 'development')
+    RAILWAY_PUBLIC_URL = os.getenv('RAILWAY_PUBLIC_URL', '')
+    is_production = NODE_ENV == 'production' and RAILWAY_PUBLIC_URL
+
+    await message.reply("🔄 正在重置 Webhook，请稍候...")
+
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info(f"✅ 管理员 {message.from_user.id} 触发 Webhook 删除")
+    except Exception as e:
+        logger.error(f"❌ 删除 Webhook 失败: {e}")
+        await message.reply(f"❌ 删除 Webhook 失败：{e}")
+        return
+
+    if is_production:
+        webhook_url = f"{RAILWAY_PUBLIC_URL}/webhook"
+        try:
+            await bot.set_webhook(url=webhook_url)
+            webhook_info = await bot.get_webhook_info()
+            await message.reply(
+                f"✅ Webhook 已重置\n"
+                f"🔗 URL: {webhook_url}\n"
+                f"📊 状态: {webhook_info.url}"
+            )
+            logger.info(f"✅ 管理员 {message.from_user.id} 重置 Webhook 至 {webhook_url}")
+        except Exception as e:
+            logger.error(f"❌ 重新设置 Webhook 失败: {e}")
+            await message.reply(f"❌ 重新设置 Webhook 失败：{e}")
+    else:
+        await message.reply(
+            "✅ Webhook 已删除\n"
+            "ℹ️ 当前为开发环境，使用轮询模式，无需重新设置 Webhook"
+        )
+
