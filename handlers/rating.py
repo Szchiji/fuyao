@@ -7,7 +7,7 @@
 import logging
 from aiogram import Router
 from aiogram.filters import StateFilter
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from states import RatingStates
 from database import (
@@ -15,12 +15,85 @@ from database import (
     check_user_rated_teacher,
     MIN_REASON_LENGTH,
     get_teacher_stats,
-    is_user_blacklisted
+    is_user_blacklisted,
+    set_teacher_info,
 )
 from bot_instance import bot
+from utils.helpers import SCORE_DIMENSIONS, extract_forwarded_teacher_info
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+@router.message(StateFilter(RatingStates.waiting_forwarded_message))
+async def process_forwarded_teacher_message(message: Message, state: FSMContext):
+    """处理用户转发的教师消息"""
+    if message.chat.type != "private":
+        await message.reply("❌ 请在私聊中转发教师消息")
+        return
+
+    data = await state.get_data()
+    teacher = data.get("teacher")
+    if not teacher:
+        await state.clear()
+        await message.reply("❌ 评价过程已失效，请重新输入 @教师用户名 开始")
+        return
+
+    forward_info = extract_forwarded_teacher_info(message)
+    if not any([
+        getattr(message, "forward_origin", None),
+        getattr(message, "forward_from", None),
+        getattr(message, "forward_from_chat", None),
+        getattr(message, "forward_sender_name", None),
+    ]):
+        await message.reply(
+            "⚠️ 这不是一条转发消息，请直接使用 Telegram 的“转发”功能发送教师消息给我。"
+        )
+        return
+
+    teacher_id = forward_info["teacher_id"]
+    teacher_username = forward_info["username"]
+    nickname = forward_info["nickname"]
+
+    if teacher_id or nickname:
+        set_teacher_info(teacher, nickname, teacher_id)
+    if teacher_username and teacher_username.lower() != teacher.lower():
+        set_teacher_info(teacher_username, nickname, teacher_id)
+
+    await state.update_data(
+        forward_checked=True,
+        forwarded_teacher_id=teacher_id,
+        forwarded_teacher_username=teacher_username,
+        forwarded_teacher_nickname=nickname,
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher}"),
+            InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher}")
+        ]
+    ])
+
+    identified_parts = []
+    if teacher_username:
+        identified_parts.append(f"@{teacher_username}")
+    if nickname:
+        identified_parts.append(nickname)
+    if teacher_id:
+        identified_parts.append(f"ID：{teacher_id}")
+
+    identify_text = (
+        "✅ 已收到转发消息\n"
+        f"已识别：{' / '.join(identified_parts)}\n\n"
+        if identified_parts else
+        "✅ 已收到转发消息\n"
+        "⚠️ 由于转发来源或隐私设置限制，暂时无法读取教师 ID，但可以继续评价。\n\n"
+    )
+
+    await message.reply(
+        identify_text + f"第 2 步：请为 @{teacher} 选择您的态度：",
+        reply_markup=kb
+    )
 
 
 @router.message(StateFilter(RatingStates.waiting_reason))
@@ -32,6 +105,9 @@ async def process_rating_reason(message: Message, state: FSMContext):
         return
     
     user_id = message.from_user.id
+    if not message.text:
+        await message.reply("⚠️ 请直接发送文字评价内容，至少 12 个字。")
+        return
     reason = message.text.strip()
     
     data = await state.get_data()
@@ -86,12 +162,22 @@ async def process_rating_reason(message: Message, state: FSMContext):
     if result["success"]:
         stats = get_teacher_stats(teacher)
         recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
+        score_summary = (
+            f"{SCORE_DIMENSIONS['teaching']['icon']} {SCORE_DIMENSIONS['teaching']['title']}："
+            f"{f'{score_teaching} 分' if score_teaching is not None else '已跳过'}\n"
+            f"{SCORE_DIMENSIONS['grading']['icon']} {SCORE_DIMENSIONS['grading']['title']}："
+            f"{f'{score_grading} 分' if score_grading is not None else '已跳过'}\n"
+            f"{SCORE_DIMENSIONS['difficulty']['icon']} {SCORE_DIMENSIONS['difficulty']['title']}："
+            f"{f'{score_difficulty} 分' if score_difficulty is not None else '已跳过'}"
+        )
         
         success_msg = f"""✅ 评价提交成功！
 
 📊 您的评价：
 教师: @{teacher}
 态度: {'👍 推荐' if recommend else '👎 不推荐'}
+评分:
+{score_summary}
 理由: {reason[:50]}...
 
 📈 最新统计：
