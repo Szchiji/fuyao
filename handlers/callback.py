@@ -61,7 +61,7 @@ async def _send_welcome(message):
         "👋 欢迎使用狼评机器人！🎓\n\n"
         "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
         "📝 使用方法：\n"
-        "在群组中输入 @teacher_name 来查询或评价教师\n\n"
+        "在群组或私聊中输入 @teacher_name，机器人会先询问您要查看评价还是提交评价\n\n"
         "例如：@李老师、@王教授、@张老师\n\n"
         "💡 更多帮助请输入 /帮助"
     )
@@ -79,6 +79,40 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
         logger.info(f"📌 处理回调: {data}")
 
         # ==================== 评价按钮 ====================
+        if data.startswith("mention_action|"):
+            parts = data.split("|", 2)
+            if len(parts) < 3:
+                await callback.answer("❌ 数据错误", show_alert=True)
+                return
+
+            action = parts[1]
+            teacher = parts[2]
+
+            if action == "view":
+                from handlers.private import _build_teacher_card
+
+                text, kb = await _build_teacher_card(teacher)
+                await callback.answer()
+                await callback.message.edit_text(text, reply_markup=kb)
+                return
+
+            if action == "rate":
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher}"),
+                        InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher}")
+                    ]
+                ])
+                await callback.answer()
+                await callback.message.edit_text(
+                    f"📝 您正在为 @{teacher} 提交评价\n\n请先选择您的态度：",
+                    reply_markup=kb
+                )
+                return
+
+            await callback.answer("❌ 暂不支持该操作", show_alert=True)
+            return
+
         if data.startswith("rec|"):
             parts = data.split("|", 2)
             if len(parts) < 3:
@@ -260,9 +294,10 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 
 ⭐ 使用步骤：
 1️⃣ 输入 @teacher_name
-2️⃣ 点击 👍 或 👎
-3️⃣ 填写评价理由（12字以上）
-4️⃣ 提交
+2️⃣ 选择查看评价或提交评价
+3️⃣ 如需评价，再点击 👍 或 👎
+4️⃣ 填写评价理由（12字以上）
+5️⃣ 提交
 
 📝 评价示例：
 "讲课很生动，逻辑清晰，认真负责，强烈推荐"
@@ -283,11 +318,10 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 步骤 1️⃣：输入教师名称
 在群组中输入: @李老师
 
-步骤 2️⃣：查看评价卡片
-机器人显示该教师的：
-• 推荐人数: 👍 5
-• 不推荐人数: 👎 2
-• 最新评价（含 ID）
+步骤 2️⃣：选择操作
+机器人会先询问您：
+• 📖 查看评价
+• 📝 提交评价
 
 步骤 3️⃣：选择态度
 • 👍 推荐
@@ -1631,4 +1665,3 @@ ID: <code>{user_id}</code>
     except Exception as e:
         logger.error(f"处理回调时出错: {e}", exc_info=True)
         await callback.answer(f"❌ 出错: {str(e)[:50]}", show_alert=True)
-

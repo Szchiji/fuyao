@@ -50,6 +50,16 @@ def _build_welcome_keyboard(start_buttons: list) -> InlineKeyboardMarkup | Reply
         )
 
 
+def _build_mention_action_keyboard(teacher_name: str) -> InlineKeyboardMarkup:
+    """构建 @提及时的操作选择按钮"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📖 查看评价", callback_data=f"mention_action|view|{teacher_name}"),
+            InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")
+        ]
+    ])
+
+
 @router.message(Command("start", "开始"))
 async def cmd_start(message: Message):
     """处理 /start 或 /开始 命令"""
@@ -146,7 +156,7 @@ async def cmd_start(message: Message):
         "👋 欢迎使用狼评机器人！🎓\n\n"
         "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
         "📝 使用方法：\n"
-        "在群组中输入 @teacher_name 来查询或评价教师\n\n"
+        "在群组或私聊中输入 @teacher_name，机器人会先询问您要查看评价还是提交评价\n\n"
         "例如：@李老师、@王教授、@张老师\n\n"
         "💡 更多帮助请输入 /帮助"
     )
@@ -177,11 +187,10 @@ async def kb_how_to_rate(message: Message):
 步骤 1️⃣：输入教师名称
 在群组中输入: @李老师
 
-步骤 2️⃣：查看评价卡片
-机器人显示该教师的：
-• 推荐人数: 👍 5
-• 不推荐人数: 👎 2
-• 最新评价（含 ID）
+步骤 2️⃣：选择操作
+机器人会先询问您：
+• 📖 查看评价
+• 📝 提交评价
 
 步骤 3️⃣：选择态度
 • 👍 推荐
@@ -259,25 +268,30 @@ async def cmd_help(message: Message):
    在群组或私聊中输入 @teacher_name
    或发送 /查询 李老师
 
-2️⃣ 查看评价卡片
-   机器人会显示该教师的：
+2️⃣ 选择操作
+   机器人会先询问您要：
+   • 📖 查看评价
+   • 📝 提交评价
+
+3️⃣ 查看评价卡片 / 开始评价
+   如果选择查看评价，机器人会显示该教师的：
    • 推荐人数 (👍)
    • 不推荐人数 (👎)
    • 综合评分（教学/给分/难度）
    • 评价详情和历史记录
 
-3️⃣ 选择态度
+4️⃣ 选择态度
    点击下方按钮：
    • 👍 推荐 - 推荐这位教师
    • 👎 不推荐 - 不推荐这位教师
 
-4️⃣ 多维度打分（可跳过）
+5️⃣ 多维度打分（可跳过）
    依次为以下三项打 1-5 分：
    • 📚 教学质量（讲课清晰度、认真程度）
    • 💰 给分情况（打分松紧、挂科率）
    • 📊 课程难度（作业量、考试难度）
 
-5️⃣ 填写评价理由
+6️⃣ 填写评价理由
    机器人在您的私聊中会发送消息
    要求您填写评价理由
    • 至少需要 12 个字
@@ -288,7 +302,7 @@ async def cmd_help(message: Message):
    ✅ "课程进度快，不太照顾基础差的同学"
    ❌ "很好" (太短了)
 
-6️⃣ 提交评价
+7️⃣ 提交评价
    评价将被保存到数据库，其他用户可以看到
 
 📊 查看评价统计：
@@ -566,10 +580,11 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     logger.info(f"👤 用户 {user_id} 查询教师 @{teacher_name}")
     
     try:
-        display_text, kb = await _build_teacher_card(teacher_name)
-
-        sent = await message.reply(display_text, reply_markup=kb)
-        logger.info(f"✅ 显示 @{teacher_name} 的评价信息")
+        sent = await message.reply(
+            f"👋 您提到了 @{teacher_name}\n\n请选择您要进行的操作：",
+            reply_markup=_build_mention_action_keyboard(teacher_name)
+        )
+        logger.info(f"✅ 已向用户询问 @{teacher_name} 的操作类型")
 
         # 在群组中自动删除机器人回复和原始消息
         if message.chat.type != "private":
