@@ -61,17 +61,8 @@ def _is_admin(user_id: int) -> bool:
 
 async def _send_welcome(message):
     """向指定消息对象发送欢迎语"""
-    from handlers.private import _build_welcome_keyboard
-    default_welcome = (
-        "👋 欢迎使用狼评机器人！🎓\n\n"
-        "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
-        "📝 使用方法：\n"
-        "在群组或私聊中输入 @teacher_name，机器人会先询问您要查看评价还是提交评价。\n"
-        "如果选择提交评价，机器人会先让您转发一条教师消息，再继续评分和填写评价。\n\n"
-        "例如：@李老师、@王教授、@张老师\n\n"
-        "💡 更多帮助请输入 /帮助"
-    )
-    welcome = get_start_message(default_welcome)
+    from handlers.private import _build_welcome_keyboard, DEFAULT_WELCOME_MESSAGE
+    welcome = get_start_message(DEFAULT_WELCOME_MESSAGE)
     start_buttons = get_start_buttons()
     kb = _build_welcome_keyboard(start_buttons)
     await message.answer(welcome, reply_markup=kb)
@@ -407,6 +398,16 @@ A: 联系管理员
 
 Q: 可以匿名评价吗？
 A: 可以用别账号""", reply_markup=kb)
+            return
+
+        if data == "leaderboard_quick":
+            await callback.answer()
+            leaderboard = get_leaderboard(10)
+            text = format_leaderboard_text(leaderboard)
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+            ])
+            await callback.message.edit_text(text, reply_markup=kb)
             return
 
         if data == "contact_admin":
@@ -1526,23 +1527,36 @@ ID: <code>{user_id}</code>
             # 若昵称或ID未在数据库中设置，尝试从 Telegram 获取
             nickname, tid = await fetch_tg_teacher_info(bot, teacher_name, nickname, tid)
 
-            header = f"📋 @{teacher_name}"
+            header = f"👨‍🏫 评价详情｜@{teacher_name}"
             if nickname:
                 header += f"\n📛 昵称：{nickname}"
             if tid:
                 header += f"\n🪪 Telegram ID：{tid}"
 
             offset = page * per_page
-            text = f"{header} 的评价\n\n"
-            text += f"━━━━━━━━━━━━━\n"
-            text += f"第 {offset + 1}–{min(offset + per_page, total)} 条 / 共 {total} 条\n"
-            text += f"━━━━━━━━━━━━━\n\n"
+            score_line = ""
+            scores = get_teacher_score_averages(teacher_name)
+            score_parts = []
+            for key in ("teaching", "grading", "difficulty"):
+                score = scores.get(key)
+                count = scores.get(f"{key}_count", 0)
+                if score is not None and count >= 1:
+                    meta = SCORE_DIMENSIONS[key]
+                    score_parts.append(f"{meta['icon']} {meta['short']} {score}")
+            if score_parts:
+                score_line = " | ".join(score_parts)
+
+            text = f"┏━━━━━━━━━━━━━━\n{header}\n┗━━━━━━━━━━━━━━\n\n"
+            text += f"📌 第 {offset + 1}–{min(offset + per_page, total)} 条 / 共 {total} 条\n"
+            if score_line:
+                text += f"⭐ 综合印象\n{score_line}\n"
+            text += "\n📝 评价列表\n\n"
 
             for i, review in enumerate(reviews, offset + 1):
                 rec_emoji = "👍" if review[2] else "👎"
                 reason_text = review[3]
                 time_str = str(review[4])[:16] if review[4] else ""
-                text += f"{i}. {rec_emoji} [#{review[0]}]\n"
+                text += f"{i}. {rec_emoji} 评价 #{review[0]}\n"
                 text += f"   💬 {reason_text[:60]}{'...' if len(reason_text) > 60 else ''}\n"
                 if time_str:
                     text += f"   🕐 {time_str}\n"
@@ -1562,6 +1576,7 @@ ID: <code>{user_id}</code>
             if nav_buttons:
                 kb_rows.append(nav_buttons)
             kb_rows.append([
+                InlineKeyboardButton(text="⬅️ 返回名片", callback_data=f"mention_action|view|{teacher_name}"),
                 InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")
             ])
 
