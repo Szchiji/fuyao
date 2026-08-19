@@ -74,7 +74,7 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         if nickname:
             header += f"\n📛 昵称：{nickname}"
         if tid:
-            header += f"\n🆔 ID：{tid}"
+            header += f"\n🪪 Telegram ID：{tid}"
 
         if stats["total"] == 0:
             # 暂无评价

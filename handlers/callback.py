@@ -1431,7 +1431,7 @@ ID: <code>{user_id}</code>
 
             current = ""
             if teacher_info["nickname"] or teacher_info["teacher_id"]:
-                current = f"\n\n当前设置：\n📛 昵称：{teacher_info['nickname'] or '（未设置）'}\n🆔 ID：{teacher_info['teacher_id'] or '（未设置）'}"
+                current = f"\n\n当前设置：\n📛 昵称：{teacher_info['nickname'] or '（未设置）'}\n🪪 Telegram ID：{teacher_info['teacher_id'] or '（未设置）'}"
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="❌ 取消", callback_data="cancel_admin_input")]
@@ -1490,7 +1490,7 @@ ID: <code>{user_id}</code>
             if nickname:
                 header += f"\n📛 昵称：{nickname}"
             if tid:
-                header += f"\n🆔 ID：{tid}"
+                header += f"\n🪪 Telegram ID：{tid}"
 
             offset = page * per_page
             text = f"{header} 的评价\n\n"

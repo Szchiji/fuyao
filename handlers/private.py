@@ -484,7 +484,7 @@ async def _build_teacher_card(teacher_name: str):
     if nickname:
         header += f"\n📛 昵称：{nickname}"
     if tid:
-        header += f"\n🆔 ID：{tid}"
+        header += f"\n🪪 Telegram ID：{tid}"
 
     scores = get_teacher_score_averages(teacher_name)
     score_line = _format_score_line(scores)
