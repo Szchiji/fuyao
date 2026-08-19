@@ -118,6 +118,99 @@ class DatabaseHelper:
 _db = DatabaseHelper()
 
 
+def _normalize_teacher_name(name: str) -> str:
+    """规范化教师标识输入"""
+    return (name or "").strip().lstrip("@")
+
+
+def _dedupe_teacher_names(names: list[str]) -> list[str]:
+    """按忽略大小写的方式去重并保留顺序"""
+    result = []
+    seen = set()
+    for name in names:
+        clean_name = _normalize_teacher_name(name)
+        if not clean_name:
+            continue
+        key = clean_name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(clean_name)
+    return result
+
+
+def _build_in_clause_params(values: list[str]) -> tuple[str, tuple]:
+    """为 IN 查询构建占位符和参数"""
+    placeholders = ", ".join(["%s" if USE_POSTGRES else "?"] * len(values))
+    return f"({placeholders})", tuple(values)
+
+
+def _get_teacher_aliases_with_conn(conn, teacher: str) -> list[str]:
+    """获取与该教师同一 Telegram ID 关联的所有用户名别名"""
+    teacher = _normalize_teacher_name(teacher)
+    if not teacher:
+        return []
+
+    cursor = conn.cursor()
+    teacher_id = ""
+
+    cursor.execute(
+        _db.q(
+            "SELECT teacher_id FROM teachers WHERE LOWER(name) = LOWER(%s)",
+            "SELECT teacher_id FROM teachers WHERE LOWER(name) = LOWER(?)"
+        ),
+        (teacher,)
+    )
+    row = cursor.fetchone()
+    if row and row[0]:
+        teacher_id = str(row[0]).strip()
+    elif teacher.isdigit():
+        teacher_id = teacher
+
+    aliases = [teacher]
+    if teacher_id:
+        cursor.execute(
+            _db.q(
+                "SELECT name FROM teachers WHERE teacher_id = %s ORDER BY name",
+                "SELECT name FROM teachers WHERE teacher_id = ? ORDER BY name"
+            ),
+            (teacher_id,)
+        )
+        aliases.extend([r[0] for r in cursor.fetchall() if r[0]])
+
+    return _dedupe_teacher_names(aliases)
+
+
+def _get_teacher_aliases(teacher: str) -> list[str]:
+    """获取教师相关的所有用户名别名"""
+    try:
+        with _db.connect() as conn:
+            aliases = _get_teacher_aliases_with_conn(conn, teacher)
+        return aliases or [_normalize_teacher_name(teacher)]
+    except Exception as e:
+        logger.error(f"获取教师别名失败: {e}")
+        normalized = _normalize_teacher_name(teacher)
+        return [normalized] if normalized else []
+
+
+def _migrate_add_score_columns(conn) -> None:
+    """迁移：为旧数据库的 recs 表添加三个评分字段（幂等操作）"""
+    cursor = conn.cursor()
+    score_cols = ["score_teaching", "score_grading", "score_difficulty"]
+    for col in score_cols:
+        try:
+            if USE_POSTGRES:
+                cursor.execute(
+                    f"ALTER TABLE recs ADD COLUMN IF NOT EXISTS {col} INTEGER DEFAULT NULL"
+                )
+            else:
+                # SQLite 不支持 IF NOT EXISTS，需捕获异常
+                cursor.execute(f"ALTER TABLE recs ADD COLUMN {col} INTEGER DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
 def init_db() -> None:
     """初始化数据库"""
     try:
@@ -135,6 +228,9 @@ def init_db() -> None:
                         recommend INTEGER NOT NULL,
                         reason TEXT NOT NULL,
                         time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        score_teaching INTEGER DEFAULT NULL,
+                        score_grading INTEGER DEFAULT NULL,
+                        score_difficulty INTEGER DEFAULT NULL,
                         UNIQUE(teacher, user_id)
                     )
                 """)
@@ -170,6 +266,7 @@ def init_db() -> None:
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_teachers_teacher_id ON teachers(teacher_id)")
                 except Exception:
                     conn.rollback()
             else:
@@ -183,6 +280,9 @@ def init_db() -> None:
                         recommend INTEGER NOT NULL,
                         reason TEXT NOT NULL,
                         time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        score_teaching INTEGER DEFAULT NULL,
+                        score_grading INTEGER DEFAULT NULL,
+                        score_difficulty INTEGER DEFAULT NULL,
                         UNIQUE(teacher, user_id)
                     )
                 """)
@@ -217,8 +317,13 @@ def init_db() -> None:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_teachers_teacher_id ON teachers(teacher_id)")
 
             conn.commit()
+
+            # 向后兼容：为旧数据库添加评分字段
+            _migrate_add_score_columns(conn)
+
             db_info = "PostgreSQL" if USE_POSTGRES else "SQLite"
             logger.info(f"✅ {db_info} 数据库初始化成功")
 
@@ -230,19 +335,30 @@ def init_db() -> None:
 def check_user_rated_teacher(teacher: str, user_id: int) -> bool:
     """检查用户是否已评价该教师"""
     try:
-        result = _db.query_one(
-            "SELECT id FROM recs WHERE teacher = %s AND user_id = %s",
-            "SELECT id FROM recs WHERE teacher = ? AND user_id = ?",
-            (teacher, user_id)
-        )
-        return result is not None
+        aliases = _get_teacher_aliases(teacher)
+        if not aliases:
+            return False
+
+        in_clause, alias_params = _build_in_clause_params(aliases)
+        with _db.connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT id FROM recs WHERE teacher IN {in_clause} AND user_id = "
+                f"{'%s' if USE_POSTGRES else '?'} LIMIT 1",
+                alias_params + (user_id,)
+            )
+            return cursor.fetchone() is not None
     except Exception as e:
         logger.error(f"检查评价记录时出错: {e}")
         return False
 
 
-def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> dict:
+def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int,
+                    score_teaching: Optional[int] = None,
+                    score_grading: Optional[int] = None,
+                    score_difficulty: Optional[int] = None) -> dict:
     """添加评价"""
+    teacher = _normalize_teacher_name(teacher)
     if len(reason.strip()) < MIN_REASON_LENGTH:
         return {
             "success": False,
@@ -257,9 +373,11 @@ def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> d
 
     try:
         _db.execute(
-            "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (%s, %s, %s, %s)",
-            "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (?, ?, ?, ?)",
-            (teacher, user_id, recommend, reason)
+            "INSERT INTO recs (teacher, user_id, recommend, reason, score_teaching, score_grading, score_difficulty)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO recs (teacher, user_id, recommend, reason, score_teaching, score_grading, score_difficulty)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (teacher, user_id, recommend, reason, score_teaching, score_grading, score_difficulty)
         )
         logger.info(f"✅ 用户 {user_id} 成功评价了 {teacher}")
         return {"success": True, "msg": "✅ 评价提交成功！\n\n感谢您的反馈！"}
@@ -273,24 +391,32 @@ def get_teacher_stats(teacher: str) -> dict:
     try:
         with _db.connect() as conn:
             cursor = conn.cursor()
-            q = _db.q
+            aliases = _get_teacher_aliases_with_conn(conn, teacher)
+            if not aliases:
+                return {"teacher": teacher, "total": 0, "recommend": 0, "not_recommend": 0, "latest": []}
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ?"), (teacher,))
+            in_clause, alias_params = _build_in_clause_params(aliases)
+
+            cursor.execute(f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause}", alias_params)
             total = cursor.fetchone()[0]
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 1",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 1"), (teacher,))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause} AND recommend = 1",
+                alias_params
+            )
             recommend_count = cursor.fetchone()[0]
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 0",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 0"), (teacher,))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause} AND recommend = 0",
+                alias_params
+            )
             not_recommend_count = cursor.fetchone()[0]
 
-            cursor.execute(q(
-                "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC LIMIT 3",
-                "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC LIMIT 3"
-            ), (teacher,))
+            cursor.execute(
+                f"SELECT id, user_id, recommend, reason, time FROM recs "
+                f"WHERE teacher IN {in_clause} ORDER BY time DESC LIMIT 3",
+                alias_params
+            )
             latest = cursor.fetchall()
 
         return {
@@ -315,8 +441,12 @@ def get_global_stats() -> dict:
             cursor.execute("SELECT COUNT(*) FROM recs")
             total_eval = cursor.fetchone()[0]
 
-            cursor.execute("SELECT COUNT(DISTINCT teacher) FROM recs")
-            total_teacher = cursor.fetchone()[0]
+            cursor.execute("SELECT DISTINCT teacher FROM recs")
+            distinct_teachers = [row[0] for row in cursor.fetchall() if row[0]]
+            total_teacher = len({
+                (get_teacher_info(name).get("teacher_id") or _normalize_teacher_name(name).lower())
+                for name in distinct_teachers
+            })
 
             today = datetime.now(timezone(timedelta(hours=8))).date()
             cursor.execute(q(
@@ -559,6 +689,10 @@ def get_user_by_username(username: str) -> dict:
 def set_teacher_info(name: str, nickname: str = "", teacher_id: str = "") -> None:
     """设置教师昵称和ID"""
     try:
+        name = _normalize_teacher_name(name)
+        if not name:
+            return
+        teacher_id = str(teacher_id).strip() if teacher_id else ""
         _db.upsert(
             """INSERT INTO teachers (name, nickname, teacher_id)
                VALUES (%s, %s, %s)
@@ -575,13 +709,26 @@ def set_teacher_info(name: str, nickname: str = "", teacher_id: str = "") -> Non
 def get_teacher_info(name: str) -> dict:
     """获取教师昵称和ID，未设置则返回空字符串"""
     try:
+        name = _normalize_teacher_name(name)
         row = _db.query_one(
-            "SELECT nickname, teacher_id FROM teachers WHERE name = %s",
-            "SELECT nickname, teacher_id FROM teachers WHERE name = ?",
+            "SELECT nickname, teacher_id FROM teachers WHERE LOWER(name) = LOWER(%s)",
+            "SELECT nickname, teacher_id FROM teachers WHERE LOWER(name) = LOWER(?)",
             (name,)
         )
+        if not row:
+            row = _db.query_one(
+                "SELECT nickname, teacher_id FROM teachers WHERE teacher_id = %s LIMIT 1",
+                "SELECT nickname, teacher_id FROM teachers WHERE teacher_id = ? LIMIT 1",
+                (name,)
+            )
+        if not row:
+            row = _db.query_one(
+                "SELECT nickname, teacher_id FROM teachers WHERE LOWER(nickname) = LOWER(%s) LIMIT 1",
+                "SELECT nickname, teacher_id FROM teachers WHERE LOWER(nickname) = LOWER(?) LIMIT 1",
+                (name,)
+            )
         if row:
-            return {"nickname": row[0] or "", "teacher_id": row[1] or ""}
+            return {"nickname": row[0] or "", "teacher_id": str(row[1] or "")}
         return {"nickname": "", "teacher_id": ""}
     except Exception as e:
         logger.error(f"获取教师信息失败: {e}")
@@ -592,13 +739,16 @@ def get_teacher_reviews_page(teacher: str, page: int = 0, per_page: int = 5) -> 
     """分页获取教师评价（用于"更多评价"按钮）"""
     try:
         offset = page * per_page
-        return _db.query_all(
-            "SELECT id, user_id, recommend, reason, time FROM recs"
-            " WHERE teacher = %s ORDER BY time DESC LIMIT %s OFFSET %s",
-            "SELECT id, user_id, recommend, reason, time FROM recs"
-            " WHERE teacher = ? ORDER BY time DESC LIMIT ? OFFSET ?",
-            (teacher, per_page, offset)
+        aliases = _get_teacher_aliases(teacher)
+        if not aliases:
+            return []
+        in_clause, alias_params = _build_in_clause_params(aliases)
+        query = (
+            f"SELECT id, user_id, recommend, reason, time FROM recs "
+            f"WHERE teacher IN {in_clause} ORDER BY time DESC "
+            f"LIMIT {'%s' if USE_POSTGRES else '?'} OFFSET {'%s' if USE_POSTGRES else '?'}"
         )
+        return _db.query_all(query, query, alias_params + (per_page, offset))
     except Exception as e:
         logger.error(f"分页获取教师评价失败: {e}")
         return []
@@ -631,14 +781,16 @@ def delete_teacher_data_from_db(teacher: str) -> dict:
     try:
         with _db.connect() as conn:
             cursor = conn.cursor()
-            q = _db.q
+            aliases = _get_teacher_aliases_with_conn(conn, teacher)
+            if not aliases:
+                aliases = [_normalize_teacher_name(teacher)]
+            in_clause, alias_params = _build_in_clause_params(aliases)
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ?"), (teacher,))
+            cursor.execute(f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause}", alias_params)
             total = cursor.fetchone()[0]
 
-            cursor.execute(q("DELETE FROM recs WHERE teacher = %s",
-                             "DELETE FROM recs WHERE teacher = ?"), (teacher,))
+            cursor.execute(f"DELETE FROM recs WHERE teacher IN {in_clause}", alias_params)
+            cursor.execute(f"DELETE FROM teachers WHERE name IN {in_clause}", alias_params)
             conn.commit()
 
         logger.warning(f"🗑️ 已删除教师 @{teacher} 的 {total} 条评价数据")
@@ -663,11 +815,15 @@ def delete_user_rating(teacher: str, user_id: int) -> dict:
         删除结果
     """
     try:
-        _db.execute(
-            "DELETE FROM recs WHERE teacher = %s AND user_id = %s",
-            "DELETE FROM recs WHERE teacher = ? AND user_id = ?",
-            (teacher, user_id)
+        aliases = _get_teacher_aliases(teacher)
+        if not aliases:
+            return {"success": False, "msg": "❌ 未找到教师记录"}
+        in_clause, alias_params = _build_in_clause_params(aliases)
+        query = (
+            f"DELETE FROM recs WHERE teacher IN {in_clause} "
+            f"AND user_id = {'%s' if USE_POSTGRES else '?'}"
         )
+        _db.execute(query, query, alias_params + (user_id,))
         logger.warning(f"🗑️ 已删除用户 {user_id} 对教师 @{teacher} 的评价")
         return {"success": True, "msg": "✅ 评价已删除"}
     except Exception as e:
@@ -688,25 +844,33 @@ def get_teacher_detail(teacher: str) -> Optional[dict]:
     try:
         with _db.connect() as conn:
             cursor = conn.cursor()
-            q = _db.q
+            aliases = _get_teacher_aliases_with_conn(conn, teacher)
+            if not aliases:
+                return None
+            in_clause, alias_params = _build_in_clause_params(aliases)
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ?"), (teacher,))
+            cursor.execute(f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause}", alias_params)
             total = cursor.fetchone()[0]
 
             if total == 0:
                 return None
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 1",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 1"), (teacher,))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause} AND recommend = 1",
+                alias_params
+            )
             yes_count = cursor.fetchone()[0]
 
-            cursor.execute(q("SELECT COUNT(*) FROM recs WHERE teacher = %s AND recommend = 0",
-                             "SELECT COUNT(*) FROM recs WHERE teacher = ? AND recommend = 0"), (teacher,))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM recs WHERE teacher IN {in_clause} AND recommend = 0",
+                alias_params
+            )
             no_count = cursor.fetchone()[0]
 
-            cursor.execute(q("SELECT reason FROM recs WHERE teacher = %s ORDER BY time DESC",
-                             "SELECT reason FROM recs WHERE teacher = ? ORDER BY time DESC"), (teacher,))
+            cursor.execute(
+                f"SELECT reason FROM recs WHERE teacher IN {in_clause} ORDER BY time DESC",
+                alias_params
+            )
             reasons = [row[0] for row in cursor.fetchall()]
 
         return {"yes": yes_count, "no": no_count, "reasons": reasons}
@@ -726,11 +890,12 @@ def get_teacher_all_ratings(teacher: str) -> list:
         评价列表
     """
     try:
-        return _db.query_all(
-            "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = %s ORDER BY time DESC",
-            "SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher = ? ORDER BY time DESC",
-            (teacher,)
-        )
+        aliases = _get_teacher_aliases(teacher)
+        if not aliases:
+            return []
+        in_clause, alias_params = _build_in_clause_params(aliases)
+        query = f"SELECT id, user_id, recommend, reason, time FROM recs WHERE teacher IN {in_clause} ORDER BY time DESC"
+        return _db.query_all(query, query, alias_params)
     except Exception as e:
         logger.error(f"获取教师评价失败: {e}")
         return []
@@ -746,39 +911,52 @@ def get_leaderboard(limit: int = 10) -> list:
     Returns:
         列表，每项为 dict: teacher, total, recommend, not_recommend, recommend_pct
     """
-    pg_query = """
-        SELECT teacher,
-               COUNT(*) AS total,
-               SUM(CASE WHEN recommend = 1 THEN 1 ELSE 0 END) AS recommend_count,
-               SUM(CASE WHEN recommend = 0 THEN 1 ELSE 0 END) AS not_recommend_count
-        FROM recs
-        GROUP BY teacher
-        ORDER BY recommend_count DESC, total DESC
-        LIMIT %s
-    """
-    sqlite_query = """
-        SELECT teacher,
-               COUNT(*) AS total,
-               SUM(CASE WHEN recommend = 1 THEN 1 ELSE 0 END) AS recommend_count,
-               SUM(CASE WHEN recommend = 0 THEN 1 ELSE 0 END) AS not_recommend_count
-        FROM recs
-        GROUP BY teacher
-        ORDER BY recommend_count DESC, total DESC
-        LIMIT ?
-    """
-
     try:
-        rows = _db.query_all(pg_query, sqlite_query, (limit,))
-        return [
-            {
-                "teacher": row[0],
-                "total": row[1],
-                "recommend": row[2],
-                "not_recommend": row[3],
-                "recommend_pct": int(row[2] / row[1] * 100) if row[1] > 0 else 0,
-            }
-            for row in rows
-        ]
+        rows = _db.query_all(
+            """SELECT teacher,
+                      COUNT(*) AS total,
+                      SUM(CASE WHEN recommend = 1 THEN 1 ELSE 0 END) AS recommend_count,
+                      SUM(CASE WHEN recommend = 0 THEN 1 ELSE 0 END) AS not_recommend_count
+               FROM recs
+               GROUP BY teacher""",
+            """SELECT teacher,
+                      COUNT(*) AS total,
+                      SUM(CASE WHEN recommend = 1 THEN 1 ELSE 0 END) AS recommend_count,
+                      SUM(CASE WHEN recommend = 0 THEN 1 ELSE 0 END) AS not_recommend_count
+               FROM recs
+               GROUP BY teacher"""
+        )
+        merged = {}
+        for row in rows:
+            teacher_name = row[0]
+            info = get_teacher_info(teacher_name)
+            key = info.get("teacher_id") or _normalize_teacher_name(teacher_name).lower()
+            entry = merged.setdefault(key, {
+                "teacher": teacher_name,
+                "total": 0,
+                "recommend": 0,
+                "not_recommend": 0,
+            })
+            entry["total"] += row[1] or 0
+            entry["recommend"] += row[2] or 0
+            entry["not_recommend"] += row[3] or 0
+            if (row[1] or 0) > entry.get("_best_total", -1):
+                entry["teacher"] = teacher_name
+                entry["_best_total"] = row[1] or 0
+
+        result = []
+        for entry in merged.values():
+            total = entry["total"]
+            result.append({
+                "teacher": entry["teacher"],
+                "total": total,
+                "recommend": entry["recommend"],
+                "not_recommend": entry["not_recommend"],
+                "recommend_pct": int(entry["recommend"] / total * 100) if total > 0 else 0,
+            })
+
+        result.sort(key=lambda item: (item["recommend"], item["total"]), reverse=True)
+        return result[:limit]
     except Exception as e:
         logger.error(f"获取排行榜失败: {e}")
         return []
@@ -787,11 +965,15 @@ def get_leaderboard(limit: int = 10) -> list:
 def delete_rating_by_id(rating_id: str, teacher: str) -> dict:
     """删除指定 ID 的评价"""
     try:
-        _db.execute(
-            "DELETE FROM recs WHERE id = %s AND teacher = %s",
-            "DELETE FROM recs WHERE id = ? AND teacher = ?",
-            (int(rating_id), teacher)
+        aliases = _get_teacher_aliases(teacher)
+        if not aliases:
+            return {"success": False, "msg": "❌ 未找到教师记录"}
+        in_clause, alias_params = _build_in_clause_params(aliases)
+        query = (
+            f"DELETE FROM recs WHERE id = {'%s' if USE_POSTGRES else '?'} "
+            f"AND teacher IN {in_clause}"
         )
+        _db.execute(query, query, (int(rating_id),) + alias_params)
         logger.warning(f"🗑️ 删除了评价 ID: {rating_id}")
         return {"success": True, "msg": "✅ 评价已删除"}
     except Exception as e:
@@ -860,3 +1042,67 @@ def get_all_blacklisted_users() -> list:
         logger.error(f"获取黑名单失败: {e}")
         return []
 
+
+def search_teachers(keyword: str) -> list:
+    """模糊搜索教师名称（从 recs 表中查找包含关键词的教师）"""
+    try:
+        keyword = _normalize_teacher_name(keyword)
+        pattern = f"%{keyword}%"
+        rec_rows = _db.query_all(
+            "SELECT DISTINCT teacher FROM recs WHERE LOWER(teacher) LIKE LOWER(%s) ORDER BY teacher LIMIT 20",
+            "SELECT DISTINCT teacher FROM recs WHERE LOWER(teacher) LIKE LOWER(?) ORDER BY teacher LIMIT 20",
+            (pattern,)
+        )
+        teacher_rows = _db.query_all(
+            "SELECT name FROM teachers WHERE LOWER(name) LIKE LOWER(%s) OR LOWER(nickname) LIKE LOWER(%s) OR teacher_id LIKE %s ORDER BY name LIMIT 20",
+            "SELECT name FROM teachers WHERE LOWER(name) LIKE LOWER(?) OR LOWER(nickname) LIKE LOWER(?) OR teacher_id LIKE ? ORDER BY name LIMIT 20",
+            (pattern, pattern, pattern)
+        )
+
+        results = []
+        seen = set()
+        for row in list(rec_rows) + list(teacher_rows):
+            name = row[0]
+            info = get_teacher_info(name)
+            key = info.get("teacher_id") or _normalize_teacher_name(name).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(name)
+        return results[:20]
+    except Exception as e:
+        logger.error(f"搜索教师失败: {e}")
+        return []
+
+
+def get_teacher_score_averages(teacher: str) -> dict:
+    """获取教师的三项评分平均值（仅统计非 NULL 的评分记录）"""
+    try:
+        aliases = _get_teacher_aliases(teacher)
+        if not aliases:
+            return {"teaching": None, "grading": None, "difficulty": None,
+                    "teaching_count": 0, "grading_count": 0, "difficulty_count": 0}
+        in_clause, alias_params = _build_in_clause_params(aliases)
+        query = (
+            f"SELECT AVG(score_teaching), AVG(score_grading), AVG(score_difficulty),"
+            f" COUNT(score_teaching), COUNT(score_grading), COUNT(score_difficulty)"
+            f" FROM recs WHERE teacher IN {in_clause}"
+        )
+        row = _db.query_one(query, query, alias_params)
+        if row:
+            def fmt(val):
+                return round(float(val), 1) if val is not None else None
+            return {
+                "teaching": fmt(row[0]),
+                "grading": fmt(row[1]),
+                "difficulty": fmt(row[2]),
+                "teaching_count": row[3] or 0,
+                "grading_count": row[4] or 0,
+                "difficulty_count": row[5] or 0,
+            }
+        return {"teaching": None, "grading": None, "difficulty": None,
+                "teaching_count": 0, "grading_count": 0, "difficulty_count": 0}
+    except Exception as e:
+        logger.error(f"获取教师评分均值失败: {e}")
+        return {"teaching": None, "grading": None, "difficulty": None,
+                "teaching_count": 0, "grading_count": 0, "difficulty_count": 0}
