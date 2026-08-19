@@ -262,6 +262,13 @@ def init_db() -> None:
                         banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS sub_admins (
+                        user_id BIGINT PRIMARY KEY,
+                        username TEXT DEFAULT '',
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
                 try:
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user ON recs(user_id)")
@@ -312,6 +319,13 @@ def init_db() -> None:
                         user_id INTEGER PRIMARY KEY,
                         reason TEXT DEFAULT '',
                         banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS sub_admins (
+                        user_id INTEGER PRIMARY KEY,
+                        username TEXT DEFAULT '',
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_teacher ON recs(teacher)")
@@ -1106,3 +1120,62 @@ def get_teacher_score_averages(teacher: str) -> dict:
         logger.error(f"获取教师评分均值失败: {e}")
         return {"teaching": None, "grading": None, "difficulty": None,
                 "teaching_count": 0, "grading_count": 0, "difficulty_count": 0}
+
+
+# ==================== 普通管理员（sub_admin）管理 ====================
+
+def add_sub_admin(user_id: int, username: str = "") -> dict:
+    """添加普通管理员"""
+    try:
+        _db.execute(
+            "INSERT INTO sub_admins (user_id, username) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            "INSERT OR IGNORE INTO sub_admins (user_id, username) VALUES (?, ?)",
+            (user_id, username or "")
+        )
+        logger.info(f"✅ 已添加普通管理员: {user_id}")
+        return {"success": True, "msg": f"✅ 已添加普通管理员 ID: <code>{user_id}</code>"}
+    except Exception as e:
+        logger.error(f"添加普通管理员失败: {e}")
+        return {"success": False, "msg": f"❌ 添加失败: {e}"}
+
+
+def remove_sub_admin(user_id: int) -> dict:
+    """移除普通管理员"""
+    try:
+        _db.execute(
+            "DELETE FROM sub_admins WHERE user_id = %s",
+            "DELETE FROM sub_admins WHERE user_id = ?",
+            (user_id,)
+        )
+        logger.info(f"✅ 已移除普通管理员: {user_id}")
+        return {"success": True, "msg": f"✅ 已移除普通管理员 ID: <code>{user_id}</code>"}
+    except Exception as e:
+        logger.error(f"移除普通管理员失败: {e}")
+        return {"success": False, "msg": f"❌ 移除失败: {e}"}
+
+
+def is_sub_admin(user_id: int) -> bool:
+    """判断用户是否为普通管理员"""
+    try:
+        row = _db.query_one(
+            "SELECT user_id FROM sub_admins WHERE user_id = %s",
+            "SELECT user_id FROM sub_admins WHERE user_id = ?",
+            (user_id,)
+        )
+        return row is not None
+    except Exception as e:
+        logger.error(f"检查普通管理员失败: {e}")
+        return False
+
+
+def get_all_sub_admins() -> list:
+    """获取所有普通管理员列表"""
+    try:
+        rows = _db.query_all(
+            "SELECT user_id, username, added_at FROM sub_admins ORDER BY added_at",
+            "SELECT user_id, username, added_at FROM sub_admins ORDER BY added_at"
+        )
+        return [{"user_id": r[0], "username": r[1], "added_at": r[2]} for r in rows]
+    except Exception as e:
+        logger.error(f"获取普通管理员列表失败: {e}")
+        return []

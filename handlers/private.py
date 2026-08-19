@@ -50,24 +50,14 @@ DEFAULT_WELCOME_MESSAGE = (
 )
 
 
-def _build_welcome_keyboard(start_buttons: list) -> InlineKeyboardMarkup:
-    """根据是否有自定义按钮决定键盘类型"""
+def _build_welcome_keyboard(start_buttons: list):
+    """根据是否有自定义按钮决定键盘类型；无自定义按钮时不显示底部按钮"""
     if start_buttons:
         kb_rows = []
         for btn in start_buttons:
             kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
         return InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    else:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📘 快速上手", callback_data="show_help"),
-                InlineKeyboardButton(text="📝 评价流程", callback_data="how_to_rate"),
-            ],
-            [
-                InlineKeyboardButton(text="🏆 教师榜单", callback_data="leaderboard_quick"),
-                InlineKeyboardButton(text="❓ 常见问题", callback_data="faq"),
-            ],
-        ])
+    return None
 
 
 def _build_mention_action_keyboard(teacher_name: str) -> InlineKeyboardMarkup:

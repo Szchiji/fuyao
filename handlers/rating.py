@@ -25,6 +25,34 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def _build_share_card(teacher: str, recommend: int, reason: str, stats: dict,
+                      recommend_pct: int, score_teaching, score_grading, score_difficulty) -> str:
+    """构建评价完成后的文字分享卡片"""
+    rec_emoji = "👍 推荐" if recommend else "👎 不推荐"
+    score_parts = []
+    if score_teaching is not None:
+        score_parts.append(f"🤝 服务 {score_teaching}分")
+    if score_grading is not None:
+        score_parts.append(f"✨ 形象 {score_grading}分")
+    if score_difficulty is not None:
+        score_parts.append(f"🌟 推荐 {score_difficulty}分")
+    score_text = "  ".join(score_parts) if score_parts else "（未打分）"
+
+    card = (
+        f"━━━━━━ 📋 评价分享卡 ━━━━━━\n"
+        f"👨‍🏫 教师：@{teacher}\n"
+        f"🏷️ 态度：{rec_emoji}\n"
+        f"⭐ 评分：{score_text}\n"
+        f"💬 评价：{reason[:80]}{'...' if len(reason) > 80 else ''}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 综合数据（共 {stats['total']} 条评价）\n"
+        f"👍 推荐率 {recommend_pct}%  |  👎 不推荐 {100 - recommend_pct}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 在任意群聊中发送「@机器人名 {teacher}」即可查看完整评价"
+    )
+    return card
+
+
 @router.message(StateFilter(RatingStates.waiting_forwarded_message))
 async def process_forwarded_teacher_message(message: Message, state: FSMContext):
     """处理用户转发的教师消息"""
@@ -186,8 +214,16 @@ async def process_rating_reason(message: Message, state: FSMContext):
 • 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
 
 🎉 感谢您的反馈！"""
-        
+
+        # 分享卡片
+        share_card = _build_share_card(teacher, recommend, reason, stats, recommend_percentage,
+                                       score_teaching, score_grading, score_difficulty)
+        share_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 点击分享此卡片", switch_inline_query=teacher)]
+        ])
+
         await message.reply(success_msg)
+        await message.answer(share_card, reply_markup=share_kb)
         logger.info(f"✅ 用户 {user_id} 成功评价了 @{teacher}")
     else:
         await message.reply(result["msg"])
