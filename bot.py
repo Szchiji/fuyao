@@ -56,6 +56,13 @@ except Exception as e:
     logger.error(f"❌ 加载 private_router 失败: {e}")
     exit(1)
 
+try:
+    from handlers.inline import router as inline_router
+    logger.info("✅ inline_router 已加载")
+except Exception as e:
+    logger.error(f"❌ 加载 inline_router 失败: {e}")
+    exit(1)
+
 # 数据库初始化（带重试逻辑，应对服务器崩溃后数据库短暂不可用的情况）
 _DB_INIT_RETRIES = 5
 _DB_INIT_DELAY = 10  # 秒
@@ -101,6 +108,9 @@ async def setup_dispatcher():
     
     dp.include_router(private_router)
     logger.info("✅ private_router 已注册")
+
+    dp.include_router(inline_router)
+    logger.info("✅ inline_router 已注册")
 
     # 注册黑名单中间件（拦截所有消息和回调）
     dp.message.middleware(BlacklistMiddleware())

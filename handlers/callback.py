@@ -54,7 +54,19 @@ REVIEWS_PER_PAGE = 5  # 「更多评价」每页显示的评价条数
 
 
 def _is_admin(user_id: int) -> bool:
-    """检查用户是否为管理员"""
+    """检查用户是否为超级管理员或普通管理员"""
+    from config import ADMIN_IDS
+    if user_id in ADMIN_IDS:
+        return True
+    try:
+        from database import is_sub_admin
+        return is_sub_admin(user_id)
+    except Exception:
+        return False
+
+
+def _is_super_admin(user_id: int) -> bool:
+    """检查用户是否为超级管理员（ADMIN_IDS）"""
     from config import ADMIN_IDS
     return user_id in ADMIN_IDS
 
@@ -1714,6 +1726,81 @@ ID: <code>{user_id}</code>
             await callback.answer(result["msg"][:200], show_alert=True)
             await callback.message.edit_text(result["msg"], reply_markup=kb)
             logger.info(f"✅ 管理员 {callback.from_user.id} 解除拉黑了用户 {target_user_id}")
+            return
+
+        # ==================== 副管理员管理 ====================
+
+        if data == "admin_sub_admins":
+            if not _is_super_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            from database import get_all_sub_admins
+            sub_admins = get_all_sub_admins()
+            await callback.answer()
+            if not sub_admins:
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+                ])
+                await callback.message.edit_text(
+                    "📋 暂无副管理员\n\n使用 /添加副管理员 [用户ID] 添加",
+                    reply_markup=kb
+                )
+                return
+
+            text = f"📋 副管理员列表（共 {len(sub_admins)} 人）\n\n"
+            kb_buttons = []
+            for sa in sub_admins:
+                uid = sa["user_id"]
+                uname = f"@{sa['username']}" if sa["username"] else f"ID:{uid}"
+                added = str(sa["added_at"])[:10]
+                text += f"• {uname} <code>{uid}</code>  加入:{added}\n"
+                kb_buttons.append([
+                    InlineKeyboardButton(
+                        text=f"🗑️ 移除 {uname}",
+                        callback_data=f"remove_sub_admin|{uid}"
+                    )
+                ])
+            kb_buttons.append([InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")])
+            await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons))
+            return
+
+        if data.startswith("remove_sub_admin|"):
+            if not _is_super_admin(callback.from_user.id):
+                await callback.answer("❌ 无权限", show_alert=True)
+                return
+
+            try:
+                target_uid = int(data.split("|", 1)[1])
+            except (ValueError, IndexError):
+                await callback.answer("❌ 数据错误", show_alert=True)
+                return
+
+            from database import remove_sub_admin
+            result = remove_sub_admin(target_uid)
+            await callback.answer(result["msg"][:200], show_alert=True)
+            # 刷新列表
+            from database import get_all_sub_admins
+            sub_admins = get_all_sub_admins()
+            kb_buttons = []
+            text = f"📋 副管理员列表（共 {len(sub_admins)} 人）\n\n"
+            for sa in sub_admins:
+                uid = sa["user_id"]
+                uname = f"@{sa['username']}" if sa["username"] else f"ID:{uid}"
+                added = str(sa["added_at"])[:10]
+                text += f"• {uname} <code>{uid}</code>  加入:{added}\n"
+                kb_buttons.append([
+                    InlineKeyboardButton(
+                        text=f"🗑️ 移除 {uname}",
+                        callback_data=f"remove_sub_admin|{uid}"
+                    )
+                ])
+            kb_buttons.append([InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")])
+            await callback.message.edit_text(
+                text if sub_admins else "📋 暂无副管理员",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+            )
+            logger.info(f"✅ 超级管理员 {callback.from_user.id} 移除副管理员 {target_uid}")
             return
 
     except Exception as e:

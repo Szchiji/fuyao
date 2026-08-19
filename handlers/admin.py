@@ -33,7 +33,7 @@ from database import (
     set_delete_user_messages,
     get_delete_user_messages
 )
-from utils.decorators import admin_only
+from utils.decorators import admin_only, any_admin_only
 from bot_instance import bot
 from states import AdminStates
 
@@ -102,6 +102,9 @@ def build_admin_menu_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="🚫 黑名单管理", callback_data="admin_blacklist"),
             InlineKeyboardButton(text="📖 管理帮助", callback_data="admin_help")
+        ],
+        [
+            InlineKeyboardButton(text="👥 副管理员管理", callback_data="admin_sub_admins"),
         ]
     ])
 
@@ -337,7 +340,7 @@ async def set_welcome(message: Message):
 
 # ==================== /统计 命令 ====================
 @router.message(Command("统计"))
-@admin_only
+@any_admin_only
 async def show_stats(message: Message):
     """显示统计"""
     stats = get_global_stats()
@@ -407,7 +410,7 @@ async def show_db(message: Message):
 
 # ==================== /管理帮助 命令 ====================
 @router.message(Command("管理帮助"))
-@admin_only
+@any_admin_only
 async def admin_help(message: Message):
     """管理员帮助"""
     help_text = """📖 管理员帮助
@@ -439,12 +442,18 @@ async def admin_help(message: Message):
 • /删除评价 [教师名] [评价ID] - 删除单条评价
 • /取消 - 取消操作
 
+👥 副管理员管理（超级管理员专属）：
+• /添加副管理员 [用户ID] - 授权普通管理员
+• /删除副管理员 [用户ID] - 取消普通管理员权限
+• /副管理员列表 - 查看所有普通管理员
+
 💡 交互式操作（推荐）：
 点击 /管理 进入后台，所有操作均可通过按钮完成：
 • 添加/删除/测试频道
 • 设置欢迎语（可附加按钮）
 • 广播消息（可附加按钮）
 • 管理教师数据（设置昵称/ID）
+• 副管理员管理
 
 ❓ 其他：
 • /管理帮助 - 显示此帮助"""
@@ -458,7 +467,7 @@ async def admin_help(message: Message):
 
 # ==================== /管理教师 命令 ====================
 @router.message(Command("管理教师"))
-@admin_only
+@any_admin_only
 async def manage_teacher(message: Message):
     """管理教师数据"""
     try:
@@ -515,7 +524,7 @@ async def manage_teacher(message: Message):
 
 # ==================== /查看评价 命令 ====================
 @router.message(Command("查看评价"))
-@admin_only
+@any_admin_only
 async def view_teacher_ratings(message: Message):
     """查看某个教师的所有评价 - 支持点击跳转私聊"""
     try:
@@ -588,7 +597,7 @@ def build_ratings_view(teacher_name: str, ratings: list) -> tuple:
 
 # ==================== /删除教师数据 命令 ====================
 @router.message(Command("删除教师数据"))
-@admin_only
+@any_admin_only
 async def delete_teacher_data(message: Message):
     """删除某个教师的所有评价数据"""
     try:
@@ -634,7 +643,7 @@ async def delete_teacher_data(message: Message):
 
 # ==================== /确认删除 命令（保留向后兼容）====================
 @router.message(Command("确认删除"))
-@admin_only
+@any_admin_only
 async def confirm_delete_teacher(message: Message):
     """确认删除教师数据"""
     try:
@@ -664,7 +673,7 @@ async def confirm_delete_teacher(message: Message):
 
 # ==================== /删除评价 命令 ====================
 @router.message(Command("删除评价"))
-@admin_only
+@any_admin_only
 async def delete_single_rating(message: Message):
     """删除某条评价"""
     try:
@@ -691,7 +700,7 @@ async def delete_single_rating(message: Message):
 
 # ==================== /取消 命令 ====================
 @router.message(Command("取消"))
-@admin_only
+@any_admin_only
 async def cancel_operation(message: Message, state: FSMContext):
     """取消操作"""
     await state.clear()
@@ -1206,3 +1215,90 @@ async def cmd_reset_webhook(message: Message):
             "ℹ️ 当前为开发环境，使用轮询模式，无需重新设置 Webhook"
         )
 
+
+# ==================== 普通管理员（副管理员）管理 ====================
+
+@router.message(Command("添加副管理员"))
+@admin_only
+async def add_sub_admin_cmd(message: Message):
+    """添加普通管理员（副管理员）"""
+    from database import add_sub_admin
+    try:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip().isdigit():
+            await message.reply(
+                "❌ 用法错误\n\n"
+                "/添加副管理员 [用户ID]\n\n"
+                "示例：/添加副管理员 123456789"
+            )
+            return
+
+        user_id = int(parts[1].strip())
+        result = add_sub_admin(user_id)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 副管理员列表", callback_data="admin_sub_admins")],
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply(result["msg"], reply_markup=kb)
+        logger.info(f"✅ 超级管理员 {message.from_user.id} 添加副管理员 {user_id}")
+    except Exception as e:
+        await message.reply(f"❌ 操作失败: {e}")
+
+
+@router.message(Command("删除副管理员"))
+@admin_only
+async def remove_sub_admin_cmd(message: Message):
+    """删除普通管理员（副管理员）"""
+    from database import remove_sub_admin
+    try:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip().isdigit():
+            await message.reply(
+                "❌ 用法错误\n\n"
+                "/删除副管理员 [用户ID]\n\n"
+                "示例：/删除副管理员 123456789"
+            )
+            return
+
+        user_id = int(parts[1].strip())
+        result = remove_sub_admin(user_id)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 副管理员列表", callback_data="admin_sub_admins")],
+            [InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")]
+        ])
+        await message.reply(result["msg"], reply_markup=kb)
+        logger.info(f"✅ 超级管理员 {message.from_user.id} 删除副管理员 {user_id}")
+    except Exception as e:
+        await message.reply(f"❌ 操作失败: {e}")
+
+
+@router.message(Command("副管理员列表"))
+@admin_only
+async def list_sub_admins_cmd(message: Message):
+    """查看所有普通管理员（副管理员）"""
+    from database import get_all_sub_admins
+    sub_admins = get_all_sub_admins()
+    if not sub_admins:
+        await message.reply(
+            "📋 暂无副管理员\n\n"
+            "使用 /添加副管理员 [用户ID] 添加"
+        )
+        return
+
+    text = f"📋 副管理员列表（共 {len(sub_admins)} 人）\n\n"
+    kb_buttons = []
+    for sa in sub_admins:
+        uid = sa["user_id"]
+        uname = f"@{sa['username']}" if sa["username"] else f"ID:{uid}"
+        added = str(sa["added_at"])[:10]
+        text += f"• {uname} <code>{uid}</code>  加入:{added}\n"
+        kb_buttons.append([
+            InlineKeyboardButton(
+                text=f"🗑️ 移除 {uname}",
+                callback_data=f"remove_sub_admin|{uid}"
+            )
+        ])
+
+    kb_buttons.append([InlineKeyboardButton(text="🔙 返回管理菜单", callback_data="admin_menu")])
+    await message.reply(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons))
+    logger.info(f"✅ 超级管理员 {message.from_user.id} 查看副管理员列表")
