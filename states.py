@@ -8,7 +8,10 @@ from aiogram.fsm.state import State, StatesGroup
 
 class RatingStates(StatesGroup):
     """评价流程状态机"""
-    waiting_reason = State()  # 等待用户填写评价理由
+    waiting_score_teaching = State()   # 等待用户为教学质量打分（1-5）
+    waiting_score_grading = State()    # 等待用户为给分情况打分（1-5）
+    waiting_score_difficulty = State() # 等待用户为课程难度打分（1-5）
+    waiting_reason = State()           # 等待用户填写评价理由
 
 
 class AdminStates(StatesGroup):

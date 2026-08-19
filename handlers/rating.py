@@ -37,6 +37,9 @@ async def process_rating_reason(message: Message, state: FSMContext):
     data = await state.get_data()
     teacher = data.get("teacher")
     recommend = data.get("recommend")
+    score_teaching = data.get("score_teaching")
+    score_grading = data.get("score_grading")
+    score_difficulty = data.get("score_difficulty")
     
     logger.info(f"📝 用户 {user_id} 提交评价，字数: {len(reason)}")
 
@@ -75,7 +78,10 @@ async def process_rating_reason(message: Message, state: FSMContext):
         return
     
     # 提交评价
-    result = add_evaluation(teacher, recommend, reason, user_id)
+    result = add_evaluation(teacher, recommend, reason, user_id,
+                            score_teaching=score_teaching,
+                            score_grading=score_grading,
+                            score_difficulty=score_difficulty)
     
     if result["success"]:
         stats = get_teacher_stats(teacher)

@@ -10,7 +10,7 @@ from aiogram import Router
 from aiogram.filters import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
-from database import get_teacher_stats, get_teacher_info, get_delete_user_messages
+from database import get_teacher_stats, get_teacher_info, get_delete_user_messages, get_teacher_score_averages
 from states import RatingStates
 from bot_instance import bot
 from utils.helpers import fetch_tg_teacher_info, auto_delete_message
@@ -58,6 +58,17 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
         # 若昵称或ID未在数据库中设置，尝试从 Telegram 获取
         nickname, tid = await fetch_tg_teacher_info(bot, teacher_name, nickname, tid)
 
+        # 获取评分均值
+        scores = get_teacher_score_averages(teacher_name)
+        score_parts = []
+        if scores["teaching"] is not None and scores["teaching_count"] >= 1:
+            score_parts.append(f"📚 教学 {scores['teaching']}")
+        if scores["grading"] is not None and scores["grading_count"] >= 1:
+            score_parts.append(f"💰 给分 {scores['grading']}")
+        if scores["difficulty"] is not None and scores["difficulty_count"] >= 1:
+            score_parts.append(f"📊 难度 {scores['difficulty']}")
+        score_line = " | ".join(score_parts)
+
         # 构建教师信息头部
         header = f"👨‍🏫 @{teacher_name}"
         if nickname:
@@ -80,6 +91,8 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
 👎 不推荐: {stats['not_recommend']} 人 ({100-recommend_percentage}%)
 
 📈 总评价数: {stats['total']}"""
+            if score_line:
+                display_text += f"\n⭐ 评分：{score_line}"
             
             # 显示最新评价（含 ID）
             # latest 字段顺序: id(0), user_id(1), recommend(2), reason(3), time(4)

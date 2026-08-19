@@ -118,6 +118,24 @@ class DatabaseHelper:
 _db = DatabaseHelper()
 
 
+def _migrate_add_score_columns(conn) -> None:
+    """迁移：为旧数据库的 recs 表添加三个评分字段（幂等操作）"""
+    cursor = conn.cursor()
+    score_cols = ["score_teaching", "score_grading", "score_difficulty"]
+    for col in score_cols:
+        try:
+            if USE_POSTGRES:
+                cursor.execute(
+                    f"ALTER TABLE recs ADD COLUMN IF NOT EXISTS {col} INTEGER DEFAULT NULL"
+                )
+            else:
+                # SQLite 不支持 IF NOT EXISTS，需捕获异常
+                cursor.execute(f"ALTER TABLE recs ADD COLUMN {col} INTEGER DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
 def init_db() -> None:
     """初始化数据库"""
     try:
@@ -135,6 +153,9 @@ def init_db() -> None:
                         recommend INTEGER NOT NULL,
                         reason TEXT NOT NULL,
                         time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        score_teaching INTEGER DEFAULT NULL,
+                        score_grading INTEGER DEFAULT NULL,
+                        score_difficulty INTEGER DEFAULT NULL,
                         UNIQUE(teacher, user_id)
                     )
                 """)
@@ -183,6 +204,9 @@ def init_db() -> None:
                         recommend INTEGER NOT NULL,
                         reason TEXT NOT NULL,
                         time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        score_teaching INTEGER DEFAULT NULL,
+                        score_grading INTEGER DEFAULT NULL,
+                        score_difficulty INTEGER DEFAULT NULL,
                         UNIQUE(teacher, user_id)
                     )
                 """)
@@ -219,6 +243,10 @@ def init_db() -> None:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_time ON recs(time)")
 
             conn.commit()
+
+            # 向后兼容：为旧数据库添加评分字段
+            _migrate_add_score_columns(conn)
+
             db_info = "PostgreSQL" if USE_POSTGRES else "SQLite"
             logger.info(f"✅ {db_info} 数据库初始化成功")
 
@@ -241,7 +269,10 @@ def check_user_rated_teacher(teacher: str, user_id: int) -> bool:
         return False
 
 
-def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> dict:
+def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int,
+                    score_teaching: Optional[int] = None,
+                    score_grading: Optional[int] = None,
+                    score_difficulty: Optional[int] = None) -> dict:
     """添加评价"""
     if len(reason.strip()) < MIN_REASON_LENGTH:
         return {
@@ -257,9 +288,11 @@ def add_evaluation(teacher: str, recommend: int, reason: str, user_id: int) -> d
 
     try:
         _db.execute(
-            "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (%s, %s, %s, %s)",
-            "INSERT INTO recs (teacher, user_id, recommend, reason) VALUES (?, ?, ?, ?)",
-            (teacher, user_id, recommend, reason)
+            "INSERT INTO recs (teacher, user_id, recommend, reason, score_teaching, score_grading, score_difficulty)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO recs (teacher, user_id, recommend, reason, score_teaching, score_grading, score_difficulty)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (teacher, user_id, recommend, reason, score_teaching, score_grading, score_difficulty)
         )
         logger.info(f"✅ 用户 {user_id} 成功评价了 {teacher}")
         return {"success": True, "msg": "✅ 评价提交成功！\n\n感谢您的反馈！"}
@@ -859,4 +892,50 @@ def get_all_blacklisted_users() -> list:
     except Exception as e:
         logger.error(f"获取黑名单失败: {e}")
         return []
+
+
+def search_teachers(keyword: str) -> list:
+    """模糊搜索教师名称（从 recs 表中查找包含关键词的教师）"""
+    try:
+        pattern = f"%{keyword}%"
+        rows = _db.query_all(
+            "SELECT DISTINCT teacher FROM recs WHERE LOWER(teacher) LIKE LOWER(%s) ORDER BY teacher LIMIT 20",
+            "SELECT DISTINCT teacher FROM recs WHERE LOWER(teacher) LIKE LOWER(?) ORDER BY teacher LIMIT 20",
+            (pattern,)
+        )
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error(f"搜索教师失败: {e}")
+        return []
+
+
+def get_teacher_score_averages(teacher: str) -> dict:
+    """获取教师的三项评分平均值（仅统计非 NULL 的评分记录）"""
+    try:
+        row = _db.query_one(
+            "SELECT AVG(score_teaching), AVG(score_grading), AVG(score_difficulty),"
+            " COUNT(score_teaching), COUNT(score_grading), COUNT(score_difficulty)"
+            " FROM recs WHERE teacher = %s",
+            "SELECT AVG(score_teaching), AVG(score_grading), AVG(score_difficulty),"
+            " COUNT(score_teaching), COUNT(score_grading), COUNT(score_difficulty)"
+            " FROM recs WHERE teacher = ?",
+            (teacher,)
+        )
+        if row:
+            def fmt(val):
+                return round(float(val), 1) if val is not None else None
+            return {
+                "teaching": fmt(row[0]),
+                "grading": fmt(row[1]),
+                "difficulty": fmt(row[2]),
+                "teaching_count": row[3] or 0,
+                "grading_count": row[4] or 0,
+                "difficulty_count": row[5] or 0,
+            }
+        return {"teaching": None, "grading": None, "difficulty": None,
+                "teaching_count": 0, "grading_count": 0, "difficulty_count": 0}
+    except Exception as e:
+        logger.error(f"获取教师评分均值失败: {e}")
+        return {"teaching": None, "grading": None, "difficulty": None,
+                "teaching_count": 0, "grading_count": 0, "difficulty_count": 0}
 

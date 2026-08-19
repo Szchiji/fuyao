@@ -35,7 +35,8 @@ from database import (
     get_all_blacklisted_users,
     get_auto_delete_delay,
     set_delete_user_messages,
-    get_delete_user_messages
+    get_delete_user_messages,
+    get_teacher_score_averages,
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
@@ -123,21 +124,127 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
                 recommend=recommend,
                 user_id=user_id
             )
-            await private_state.set_state(RatingStates.waiting_reason)
+            await private_state.set_state(RatingStates.waiting_score_teaching)
 
             await callback.answer()
 
             emoji = "👍" if recommend else "👎"
+            score_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="⭐ 1", callback_data=f"score_teaching|1|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐ 2", callback_data=f"score_teaching|2|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐⭐ 3", callback_data=f"score_teaching|3|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐⭐⭐ 4", callback_data=f"score_teaching|4|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5", callback_data=f"score_teaching|5|{teacher}"),
+                ],
+                [InlineKeyboardButton(text="⏭️ 跳过", callback_data=f"score_teaching|skip|{teacher}")]
+            ])
             await bot.send_message(
                 user_id,
-                f"""📝 您选择了 {emoji} {'推荐' if recommend else '不推荐'} @{teacher}
+                f"📝 您选择了 {emoji} {'推荐' if recommend else '不推荐'} @{teacher}\n\n"
+                f"请为该教师的各项维度打分（1-5 分）：\n\n"
+                f"📚 第 1/3 步：教学质量（讲课清晰度、认真程度等）",
+                reply_markup=score_kb
+            )
+            return
 
-请在下方填写您的评价理由（至少 12 字）：
+        # ==================== 多维度评分回调 ====================
 
-💡 评价示例：
-"讲课很生动，逻辑清晰，认真负责，强烈推荐"
-"教学速度较快，不太照顾基础差的同学"
-"""
+        def _make_score_kb(step_callback_prefix: str, teacher: str) -> InlineKeyboardMarkup:
+            """构建 1-5 分打分键盘"""
+            return InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="⭐ 1", callback_data=f"{step_callback_prefix}|1|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐ 2", callback_data=f"{step_callback_prefix}|2|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐⭐ 3", callback_data=f"{step_callback_prefix}|3|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐⭐⭐ 4", callback_data=f"{step_callback_prefix}|4|{teacher}"),
+                    InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5", callback_data=f"{step_callback_prefix}|5|{teacher}"),
+                ],
+                [InlineKeyboardButton(text="⏭️ 跳过", callback_data=f"{step_callback_prefix}|skip|{teacher}")]
+            ])
+
+        if data.startswith("score_teaching|"):
+            parts = data.split("|", 2)
+            score_raw = parts[1]
+            teacher = parts[2]
+            user_id = callback.from_user.id
+
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(bot_id=callback.bot.id, chat_id=user_id, user_id=user_id)
+            )
+            score_val = None if score_raw == "skip" else int(score_raw)
+            await private_state.update_data(score_teaching=score_val)
+            await private_state.set_state(RatingStates.waiting_score_grading)
+
+            await callback.answer()
+            score_kb = _make_score_kb("score_grading", teacher)
+            score_label = f"{score_raw} 分" if score_raw != "skip" else "已跳过"
+            await callback.message.edit_text(
+                f"📚 教学质量：{score_label}\n\n"
+                f"💰 第 2/3 步：给分情况（打分松紧度、挂科率等）",
+                reply_markup=score_kb
+            )
+            return
+
+        if data.startswith("score_grading|"):
+            parts = data.split("|", 2)
+            score_raw = parts[1]
+            teacher = parts[2]
+            user_id = callback.from_user.id
+
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(bot_id=callback.bot.id, chat_id=user_id, user_id=user_id)
+            )
+            score_val = None if score_raw == "skip" else int(score_raw)
+            await private_state.update_data(score_grading=score_val)
+            await private_state.set_state(RatingStates.waiting_score_difficulty)
+
+            await callback.answer()
+            score_kb = _make_score_kb("score_difficulty", teacher)
+            score_label = f"{score_raw} 分" if score_raw != "skip" else "已跳过"
+            await callback.message.edit_text(
+                f"💰 给分情况：{score_label}\n\n"
+                f"📊 第 3/3 步：课程难度（作业量、考试难度等）",
+                reply_markup=score_kb
+            )
+            return
+
+        if data.startswith("score_difficulty|"):
+            parts = data.split("|", 2)
+            score_raw = parts[1]
+            teacher = parts[2]
+            user_id = callback.from_user.id
+
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(bot_id=callback.bot.id, chat_id=user_id, user_id=user_id)
+            )
+            score_val = None if score_raw == "skip" else int(score_raw)
+            await private_state.update_data(score_difficulty=score_val)
+            await private_state.set_state(RatingStates.waiting_reason)
+
+            await callback.answer()
+            score_label = f"{score_raw} 分" if score_raw != "skip" else "已跳过"
+            state_data = await private_state.get_data()
+            t_score = state_data.get("score_teaching")
+            g_score = state_data.get("score_grading")
+            d_score = score_val
+
+            summary = (
+                f"📚 教学质量：{f'{t_score} 分' if t_score is not None else '已跳过'}\n"
+                f"💰 给分情况：{f'{g_score} 分' if g_score is not None else '已跳过'}\n"
+                f"📊 课程难度：{score_label}\n"
+            )
+            recommend = state_data.get("recommend")
+            emoji = "👍" if recommend else "👎"
+            await callback.message.edit_text(
+                f"✅ 评分完成！\n\n{summary}\n"
+                f"现在请在私聊中填写您的评价理由（至少 12 字）：\n\n"
+                f"💡 评价示例：\n"
+                f"\"讲课很生动，逻辑清晰，认真负责，强烈推荐\"\n"
+                f"\"教学速度较快，不太照顾基础差的同学\""
             )
             return
 
