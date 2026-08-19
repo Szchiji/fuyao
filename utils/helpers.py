@@ -3,7 +3,7 @@ import asyncio
 import logging
 from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from database import get_teacher_detail, get_user_by_username, get_auto_delete_delay
+from database import get_teacher_detail, get_user_by_username, get_auto_delete_delay, set_teacher_info
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,16 @@ async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid:
     """
     try:
         tg_chat = await bot.get_chat(f"@{teacher_name}")
+        current_username = getattr(tg_chat, "username", None) or teacher_name
         full_name = tg_chat.first_name or ""
         if getattr(tg_chat, "last_name", None):
             full_name = f"{full_name} {tg_chat.last_name}".strip()
         nickname = full_name or nickname
         tid = str(tg_chat.id) if tg_chat.id else tid
+        if tid:
+            set_teacher_info(current_username, nickname, tid)
+            if current_username.lower() != teacher_name.lower():
+                set_teacher_info(teacher_name, nickname, tid)
     except Exception as e:
         logger.debug(f"从 Telegram 获取 @{teacher_name} 信息失败: {e}")
         # 回退：从 users 表查找曾与机器人互动过的同名用户
@@ -38,6 +43,8 @@ async def fetch_tg_teacher_info(bot: Bot, teacher_name: str, nickname: str, tid:
         if user_row:
             nickname = nickname or user_row.get("first_name", "")
             tid = tid or str(user_row.get("user_id", ""))
+            if tid:
+                set_teacher_info(teacher_name, nickname, tid)
     return nickname, tid
 
 async def send_teacher_detail(message: Message, teacher: str, edit_msg_id=None):
