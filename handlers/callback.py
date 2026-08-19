@@ -40,7 +40,12 @@ from database import (
 )
 from states import RatingStates, AdminStates
 from bot_instance import bot, get_channel_invite_link
-from utils.helpers import format_leaderboard_text, fetch_tg_teacher_info
+from utils.helpers import (
+    SCORE_DIMENSIONS,
+    build_score_keyboard,
+    format_leaderboard_text,
+    fetch_tg_teacher_info,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -56,16 +61,8 @@ def _is_admin(user_id: int) -> bool:
 
 async def _send_welcome(message):
     """向指定消息对象发送欢迎语"""
-    from handlers.private import _build_welcome_keyboard
-    default_welcome = (
-        "👋 欢迎使用狼评机器人！🎓\n\n"
-        "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
-        "📝 使用方法：\n"
-        "在群组或私聊中输入 @teacher_name，机器人会先询问您要查看评价还是提交评价\n\n"
-        "例如：@李老师、@王教授、@张老师\n\n"
-        "💡 更多帮助请输入 /帮助"
-    )
-    welcome = get_start_message(default_welcome)
+    from handlers.private import _build_welcome_keyboard, DEFAULT_WELCOME_MESSAGE
+    welcome = get_start_message(DEFAULT_WELCOME_MESSAGE)
     start_buttons = get_start_buttons()
     kb = _build_welcome_keyboard(start_buttons)
     await message.answer(welcome, reply_markup=kb)
@@ -97,17 +94,47 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
                 return
 
             if action == "rate":
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher}"),
-                        InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher}")
-                    ]
-                ])
-                await callback.answer()
-                await callback.message.edit_text(
-                    f"📝 您正在为 @{teacher} 提交评价\n\n请先选择您的态度：",
-                    reply_markup=kb
+                private_state = FSMContext(
+                    storage=state.storage,
+                    key=StorageKey(
+                        bot_id=callback.bot.id,
+                        chat_id=callback.from_user.id,
+                        user_id=callback.from_user.id
+                    )
                 )
+                await private_state.update_data(
+                    teacher=teacher,
+                    user_id=callback.from_user.id,
+                    forward_checked=False,
+                    forwarded_teacher_id="",
+                    forwarded_teacher_username="",
+                    forwarded_teacher_nickname=""
+                )
+                await private_state.set_state(RatingStates.waiting_forwarded_message)
+
+                await callback.answer()
+                prompt_text = (
+                    f"📝 正在为 @{teacher} 提交评价\n\n"
+                    f"第 1 步：请先转发一条该教师的 Telegram 消息给我。\n"
+                    f"我会尽量识别 TA 的 Telegram ID，然后再进入评分与评价流程。"
+                )
+                delivery_text = (
+                    prompt_text + "\n\n"
+                    "✅ 支持转发文字、图片、语音等消息\n"
+                    "⚠️ 请直接使用 Telegram 的“转发”功能，不要复制粘贴内容"
+                )
+                try:
+                    if callback.message.chat.type == "private":
+                        await callback.message.edit_text(delivery_text)
+                    else:
+                        await callback.message.edit_text(
+                            f"📝 已开始 @{teacher} 的评价流程\n\n"
+                            f"我已经把后续步骤发到私聊，请到私聊中继续转发教师消息。"
+                        )
+                        await bot.send_message(callback.from_user.id, delivery_text)
+                except Exception as e:
+                    logger.error(f"发送评价流程私聊失败: {e}")
+                    await callback.message.reply("❌ 无法给您发送私聊，请先私聊机器人并发送 /start 后再试。")
                 return
 
             await callback.answer("❌ 暂不支持该操作", show_alert=True)
@@ -158,44 +185,39 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
                 recommend=recommend,
                 user_id=user_id
             )
+            state_data = await private_state.get_data()
+            if not state_data.get("forward_checked"):
+                await private_state.set_state(RatingStates.waiting_forwarded_message)
+                await callback.answer("请先转发一条教师消息", show_alert=True)
+                try:
+                    await bot.send_message(
+                        user_id,
+                        f"⚠️ 在为 @{teacher} 评分前，请先转发一条该教师的消息给我。"
+                    )
+                except Exception as e:
+                    logger.error(f"提醒转发教师消息失败: {e}")
+                return
             await private_state.set_state(RatingStates.waiting_score_teaching)
 
             await callback.answer()
 
             emoji = "👍" if recommend else "👎"
-            score_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="⭐ 1", callback_data=f"score_teaching|1|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐ 2", callback_data=f"score_teaching|2|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐⭐ 3", callback_data=f"score_teaching|3|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐⭐⭐ 4", callback_data=f"score_teaching|4|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5", callback_data=f"score_teaching|5|{teacher}"),
-                ],
-                [InlineKeyboardButton(text="⏭️ 跳过", callback_data=f"score_teaching|skip|{teacher}")]
-            ])
-            await bot.send_message(
-                user_id,
-                f"📝 您选择了 {emoji} {'推荐' if recommend else '不推荐'} @{teacher}\n\n"
-                f"请为该教师的各项维度打分（1-5 分）：\n\n"
-                f"📚 第 1/3 步：教学质量（讲课清晰度、认真程度等）",
-                reply_markup=score_kb
-            )
+            score_meta = SCORE_DIMENSIONS["teaching"]
+            score_kb = build_score_keyboard("score_teaching", teacher)
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"📝 您选择了 {emoji} {'推荐' if recommend else '不推荐'} @{teacher}\n\n"
+                    f"请为该教师的各项维度打分（1-5 分）：\n\n"
+                    f"{score_meta['icon']} 第 1/3 步：{score_meta['title']}（{score_meta['description']}）",
+                    reply_markup=score_kb
+                )
+            except Exception as e:
+                logger.error(f"发送评分步骤失败: {e}")
+                await callback.answer("❌ 无法继续发送评分步骤，请稍后重试", show_alert=True)
             return
 
         # ==================== 多维度评分回调 ====================
-
-        def _make_score_kb(step_callback_prefix: str, teacher: str) -> InlineKeyboardMarkup:
-            """构建 1-5 分打分键盘"""
-            return InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="⭐ 1", callback_data=f"{step_callback_prefix}|1|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐ 2", callback_data=f"{step_callback_prefix}|2|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐⭐ 3", callback_data=f"{step_callback_prefix}|3|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐⭐⭐ 4", callback_data=f"{step_callback_prefix}|4|{teacher}"),
-                    InlineKeyboardButton(text="⭐⭐⭐⭐⭐ 5", callback_data=f"{step_callback_prefix}|5|{teacher}"),
-                ],
-                [InlineKeyboardButton(text="⏭️ 跳过", callback_data=f"{step_callback_prefix}|skip|{teacher}")]
-            ])
 
         if data.startswith("score_teaching|"):
             parts = data.split("|", 2)
@@ -212,11 +234,12 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
             await private_state.set_state(RatingStates.waiting_score_grading)
 
             await callback.answer()
-            score_kb = _make_score_kb("score_grading", teacher)
+            score_meta = SCORE_DIMENSIONS["grading"]
+            score_kb = build_score_keyboard("score_grading", teacher)
             score_label = f"{score_raw} 分" if score_raw != "skip" else "已跳过"
             await callback.message.edit_text(
-                f"📚 教学质量：{score_label}\n\n"
-                f"💰 第 2/3 步：给分情况（打分松紧度、挂科率等）",
+                f"{SCORE_DIMENSIONS['teaching']['icon']} {SCORE_DIMENSIONS['teaching']['title']}：{score_label}\n\n"
+                f"{score_meta['icon']} 第 2/3 步：{score_meta['title']}（{score_meta['description']}）",
                 reply_markup=score_kb
             )
             return
@@ -236,11 +259,12 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
             await private_state.set_state(RatingStates.waiting_score_difficulty)
 
             await callback.answer()
-            score_kb = _make_score_kb("score_difficulty", teacher)
+            score_meta = SCORE_DIMENSIONS["difficulty"]
+            score_kb = build_score_keyboard("score_difficulty", teacher)
             score_label = f"{score_raw} 分" if score_raw != "skip" else "已跳过"
             await callback.message.edit_text(
-                f"💰 给分情况：{score_label}\n\n"
-                f"📊 第 3/3 步：课程难度（作业量、考试难度等）",
+                f"{SCORE_DIMENSIONS['grading']['icon']} {SCORE_DIMENSIONS['grading']['title']}：{score_label}\n\n"
+                f"{score_meta['icon']} 第 3/3 步：{score_meta['title']}（{score_meta['description']}）",
                 reply_markup=score_kb
             )
             return
@@ -267,12 +291,10 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
             d_score = score_val
 
             summary = (
-                f"📚 教学质量：{f'{t_score} 分' if t_score is not None else '已跳过'}\n"
-                f"💰 给分情况：{f'{g_score} 分' if g_score is not None else '已跳过'}\n"
-                f"📊 课程难度：{score_label}\n"
+                f"{SCORE_DIMENSIONS['teaching']['icon']} {SCORE_DIMENSIONS['teaching']['title']}：{f'{t_score} 分' if t_score is not None else '已跳过'}\n"
+                f"{SCORE_DIMENSIONS['grading']['icon']} {SCORE_DIMENSIONS['grading']['title']}：{f'{g_score} 分' if g_score is not None else '已跳过'}\n"
+                f"{SCORE_DIMENSIONS['difficulty']['icon']} {SCORE_DIMENSIONS['difficulty']['title']}：{score_label}\n"
             )
-            recommend = state_data.get("recommend")
-            emoji = "👍" if recommend else "👎"
             await callback.message.edit_text(
                 f"✅ 评分完成！\n\n{summary}\n"
                 f"现在请在私聊中填写您的评价理由（至少 12 字）：\n\n"
@@ -295,9 +317,10 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 ⭐ 使用步骤：
 1️⃣ 输入 @teacher_name
 2️⃣ 选择查看评价或提交评价
-3️⃣ 如需评价，再点击 👍 或 👎
-4️⃣ 填写评价理由（12字以上）
-5️⃣ 提交
+3️⃣ 如需评价，先转发一条教师消息
+4️⃣ 再选择 👍 或 👎
+5️⃣ 完成三项评分并填写评价理由（12字以上）
+6️⃣ 提交
 
 📝 评价示例：
 "讲课很生动，逻辑清晰，认真负责，强烈推荐"
@@ -316,22 +339,30 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text("""⭐ 如何评价教师
 
 步骤 1️⃣：输入教师名称
-在群组中输入: @李老师
+在群组或私聊中输入: @李老师
 
 步骤 2️⃣：选择操作
 机器人会先询问您：
 • 📖 查看评价
 • 📝 提交评价
 
-步骤 3️⃣：选择态度
+步骤 3️⃣：转发教师消息
+向机器人转发一条该教师的 Telegram 消息
+
+步骤 4️⃣：选择态度
 • 👍 推荐
 • 👎 不推荐
 
-步骤 4️⃣：填写理由
+步骤 5️⃣：完成评分
+• 🤝 服务质量
+• ✨ 外貌形象
+• 🌟 推荐指数
+
+步骤 6️⃣：填写理由
 在私聊中输入评价理由
 至少 12 个字
 
-步骤 5️⃣：提交
+步骤 7️⃣：提交
 评价成功后机器人会显示确认
 
 💡 小贴士：
@@ -367,6 +398,16 @@ A: 联系管理员
 
 Q: 可以匿名评价吗？
 A: 可以用别账号""", reply_markup=kb)
+            return
+
+        if data == "leaderboard_quick":
+            await callback.answer()
+            leaderboard = get_leaderboard(10)
+            text = format_leaderboard_text(leaderboard)
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+            ])
+            await callback.message.edit_text(text, reply_markup=kb)
             return
 
         if data == "contact_admin":
@@ -1486,23 +1527,36 @@ ID: <code>{user_id}</code>
             # 若昵称或ID未在数据库中设置，尝试从 Telegram 获取
             nickname, tid = await fetch_tg_teacher_info(bot, teacher_name, nickname, tid)
 
-            header = f"📋 @{teacher_name}"
+            header = f"👨‍🏫 评价详情｜@{teacher_name}"
             if nickname:
                 header += f"\n📛 昵称：{nickname}"
             if tid:
                 header += f"\n🪪 Telegram ID：{tid}"
 
             offset = page * per_page
-            text = f"{header} 的评价\n\n"
-            text += f"━━━━━━━━━━━━━\n"
-            text += f"第 {offset + 1}–{min(offset + per_page, total)} 条 / 共 {total} 条\n"
-            text += f"━━━━━━━━━━━━━\n\n"
+            score_line = ""
+            scores = get_teacher_score_averages(teacher_name)
+            score_parts = []
+            for key in ("teaching", "grading", "difficulty"):
+                score = scores.get(key)
+                count = scores.get(f"{key}_count", 0)
+                if score is not None and count >= 1:
+                    meta = SCORE_DIMENSIONS[key]
+                    score_parts.append(f"{meta['icon']} {meta['short']} {score}")
+            if score_parts:
+                score_line = " | ".join(score_parts)
+
+            text = f"┏━━━━━━━━━━━━━━\n{header}\n┗━━━━━━━━━━━━━━\n\n"
+            text += f"📌 第 {offset + 1}–{min(offset + per_page, total)} 条 / 共 {total} 条\n"
+            if score_line:
+                text += f"⭐ 综合印象\n{score_line}\n"
+            text += "\n📝 评价列表\n\n"
 
             for i, review in enumerate(reviews, offset + 1):
                 rec_emoji = "👍" if review[2] else "👎"
                 reason_text = review[3]
                 time_str = str(review[4])[:16] if review[4] else ""
-                text += f"{i}. {rec_emoji} [#{review[0]}]\n"
+                text += f"{i}. {rec_emoji} 评价 #{review[0]}\n"
                 text += f"   💬 {reason_text[:60]}{'...' if len(reason_text) > 60 else ''}\n"
                 if time_str:
                     text += f"   🕐 {time_str}\n"
@@ -1522,8 +1576,8 @@ ID: <code>{user_id}</code>
             if nav_buttons:
                 kb_rows.append(nav_buttons)
             kb_rows.append([
-                InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
-                InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
+                InlineKeyboardButton(text="⬅️ 返回名片", callback_data=f"mention_action|view|{teacher_name}"),
+                InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")
             ])
 
             kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)

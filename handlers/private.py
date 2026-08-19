@@ -9,7 +9,7 @@ import logging
 import re
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from database import (
     get_start_message,
@@ -25,15 +25,32 @@ from database import (
 )
 from states import RatingStates
 from bot_instance import bot, get_channel_invite_link
-from utils.helpers import format_leaderboard_text, fetch_tg_teacher_info, auto_delete_message
+from utils.helpers import (
+    format_leaderboard_text,
+    fetch_tg_teacher_info,
+    auto_delete_message,
+    format_score_line,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 MAX_INLINE_REVIEWS = 3  # 卡片内最多显示的评价条数
+DEFAULT_WELCOME_MESSAGE = (
+    "👋 欢迎来到「狼评」教师评价\n\n"
+    "这里是一个更高效的教师口碑入口，帮你在联系前先看清老师的真实反馈。\n\n"
+    "🎯 你可以在这里：\n"
+    "• 查看老师的推荐率、综合印象与最新评价\n"
+    "• 提交一条客观评价，帮助更多同学快速决策\n"
+    "• 先逛教师榜单，再决定要不要深入了解\n\n"
+    "🔎 开始方式：\n"
+    "在群组或私聊直接发送 @teacher_name\n"
+    "例如：@李老师 / @王教授 / @张老师\n\n"
+    "💡 如果你是第一次使用，建议先看「评价流程」。"
+)
 
 
-def _build_welcome_keyboard(start_buttons: list) -> InlineKeyboardMarkup | ReplyKeyboardMarkup:
+def _build_welcome_keyboard(start_buttons: list) -> InlineKeyboardMarkup:
     """根据是否有自定义按钮决定键盘类型"""
     if start_buttons:
         kb_rows = []
@@ -41,22 +58,23 @@ def _build_welcome_keyboard(start_buttons: list) -> InlineKeyboardMarkup | Reply
             kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
         return InlineKeyboardMarkup(inline_keyboard=kb_rows)
     else:
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
-                [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")]
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📘 快速上手", callback_data="show_help"),
+                InlineKeyboardButton(text="📝 评价流程", callback_data="how_to_rate"),
             ],
-            resize_keyboard=True
-        )
+            [
+                InlineKeyboardButton(text="🏆 教师榜单", callback_data="leaderboard_quick"),
+                InlineKeyboardButton(text="❓ 常见问题", callback_data="faq"),
+            ],
+        ])
 
 
 def _build_mention_action_keyboard(teacher_name: str) -> InlineKeyboardMarkup:
     """构建 @提及时的操作选择按钮"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📖 查看评价", callback_data=f"mention_action|view|{teacher_name}"),
-            InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")
-        ]
+        [InlineKeyboardButton(text="📖 查看评价", callback_data=f"mention_action|view|{teacher_name}")],
+        [InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")]
     ])
 
 
@@ -152,15 +170,7 @@ async def cmd_start(message: Message):
             return
 
     # 用户已订阅或未设置频道要求
-    default_welcome = (
-        "👋 欢迎使用狼评机器人！🎓\n\n"
-        "这是一个教师评价平台，帮助同学们了解教师的教学情况。\n\n"
-        "📝 使用方法：\n"
-        "在群组或私聊中输入 @teacher_name，机器人会先询问您要查看评价还是提交评价\n\n"
-        "例如：@李老师、@王教授、@张老师\n\n"
-        "💡 更多帮助请输入 /帮助"
-    )
-    welcome = get_start_message(default_welcome)
+    welcome = get_start_message(DEFAULT_WELCOME_MESSAGE)
     start_buttons = get_start_buttons()
     kb = _build_welcome_keyboard(start_buttons)
     
@@ -169,7 +179,7 @@ async def cmd_start(message: Message):
 
 # ==================== 键盘按钮文字处理 ====================
 
-@router.message(F.text == "📖 查看帮助", StateFilter(None))
+@router.message(F.text.in_(["📖 查看帮助", "📘 帮助中心", "帮助"]), StateFilter(None))
 async def kb_show_help(message: Message):
     """处理键盘按钮：查看帮助"""
     if message.chat.type != "private":
@@ -177,7 +187,7 @@ async def kb_show_help(message: Message):
     await cmd_help(message)
 
 
-@router.message(F.text == "⭐ 如何评价", StateFilter(None))
+@router.message(F.text.in_(["⭐ 如何评价", "📝 评价流程"]), StateFilter(None))
 async def kb_how_to_rate(message: Message):
     """处理键盘按钮：如何评价"""
     if message.chat.type != "private":
@@ -185,22 +195,31 @@ async def kb_how_to_rate(message: Message):
     await message.reply("""⭐ 如何评价教师
 
 步骤 1️⃣：输入教师名称
-在群组中输入: @李老师
+在群组或私聊中输入: @李老师
 
 步骤 2️⃣：选择操作
 机器人会先询问您：
 • 📖 查看评价
 • 📝 提交评价
 
-步骤 3️⃣：选择态度
+步骤 3️⃣：转发教师消息
+向机器人转发一条该教师的 Telegram 消息
+
+步骤 4️⃣：选择态度
 • 👍 推荐
 • 👎 不推荐
 
-步骤 4️⃣：填写理由
+步骤 5️⃣：完成评分
+依次填写：
+• 🤝 服务质量
+• ✨ 外貌形象
+• 🌟 推荐指数
+
+步骤 6️⃣：填写理由
 在私聊中输入评价理由
 至少 12 个字
 
-步骤 5️⃣：提交
+步骤 7️⃣：提交
 评价成功后机器人会显示确认
 
 💡 小贴士：
@@ -277,21 +296,24 @@ async def cmd_help(message: Message):
    如果选择查看评价，机器人会显示该教师的：
    • 推荐人数 (👍)
    • 不推荐人数 (👎)
-   • 综合评分（教学/给分/难度）
+   • 综合评分（服务/形象/推荐）
    • 评价详情和历史记录
 
-4️⃣ 选择态度
+4️⃣ 转发教师消息
+   如果选择提交评价，先向机器人转发一条该教师的 Telegram 消息
+
+5️⃣ 选择态度
    点击下方按钮：
    • 👍 推荐 - 推荐这位教师
    • 👎 不推荐 - 不推荐这位教师
 
-5️⃣ 多维度打分（可跳过）
+6️⃣ 多维度打分（可跳过）
    依次为以下三项打 1-5 分：
-   • 📚 教学质量（讲课清晰度、认真程度）
-   • 💰 给分情况（打分松紧、挂科率）
-   • 📊 课程难度（作业量、考试难度）
+   • 🤝 服务质量（沟通、回应、负责程度）
+   • ✨ 外貌形象（气质、形象、状态观感）
+   • 🌟 推荐指数（你整体有多愿意推荐 TA）
 
-6️⃣ 填写评价理由
+7️⃣ 填写评价理由
    机器人在您的私聊中会发送消息
    要求您填写评价理由
    • 至少需要 12 个字
@@ -302,14 +324,14 @@ async def cmd_help(message: Message):
    ✅ "课程进度快，不太照顾基础差的同学"
    ❌ "很好" (太短了)
 
-7️⃣ 提交评价
+8️⃣ 提交评价
    评价将被保存到数据库，其他用户可以看到
 
 📊 查看评价统计：
 输入 @teacher_name 或 /查询 即可看到该教师的：
 • 总评价数
 • 推荐/不推荐比例
-• 综合评分（教学/给分/难度均值）
+• 综合评分（服务/形象/推荐均值）
 • 最新的评价内容
 
 💡 使用建议：
@@ -409,14 +431,7 @@ async def get_my_id(message: Message):
 
 def _format_score_line(scores: dict) -> str:
     """将评分均值格式化为一行文字，若无数据则返回空字符串"""
-    parts = []
-    if scores["teaching"] is not None and scores["teaching_count"] >= 1:
-        parts.append(f"📚 教学 {scores['teaching']}")
-    if scores["grading"] is not None and scores["grading_count"] >= 1:
-        parts.append(f"💰 给分 {scores['grading']}")
-    if scores["difficulty"] is not None and scores["difficulty_count"] >= 1:
-        parts.append(f"📊 难度 {scores['difficulty']}")
-    return " | ".join(parts)
+    return format_score_line(scores)
 
 
 @router.message(Command("查询", "search"))
@@ -480,7 +495,7 @@ async def _build_teacher_card(teacher_name: str):
     tid = teacher_info.get("teacher_id", "")
     nickname, tid = await fetch_tg_teacher_info(bot, teacher_name, nickname, tid)
 
-    header = f"👨‍🏫 @{teacher_name}"
+    header = f"👨‍🏫 教师名片｜@{teacher_name}"
     if nickname:
         header += f"\n📛 昵称：{nickname}"
     if tid:
@@ -491,48 +506,48 @@ async def _build_teacher_card(teacher_name: str):
 
     if stats["total"] == 0:
         display_text = (
-            f"━━━━━━━━━━━━━\n"
+            f"┏━━━━━━━━━━━━━━\n"
             f"{header}\n"
-            f"━━━━━━━━━━━━━\n\n"
-            f"📭 暂无评价记录\n\n"
-            f"快来成为第一个评价的人吧！"
+            f"┗━━━━━━━━━━━━━━\n\n"
+            f"📭 暂无公开评价\n"
+            f"这位老师还没有留下可参考的反馈。\n\n"
+            f"✨ 你可以成为第一位提交评价的人。"
         )
     else:
         recommend_percentage = int((stats["recommend"] / stats["total"]) * 100) if stats["total"] > 0 else 0
         not_rec_pct = 100 - recommend_percentage
 
         display_text = (
-            f"━━━━━━━━━━━━━\n"
+            f"┏━━━━━━━━━━━━━━\n"
             f"{header}\n"
-            f"━━━━━━━━━━━━━\n\n"
-            f"📊 评价统计：\n"
-            f"👍 推荐：{stats['recommend']} 人（{recommend_percentage}%）\n"
-            f"👎 不推荐：{stats['not_recommend']} 人（{not_rec_pct}%）\n"
-            f"📈 共 {stats['total']} 条评价\n"
+            f"┗━━━━━━━━━━━━━━\n\n"
+            f"📌 当前概览\n"
+            f"• 评价样本：{stats['total']} 条\n"
+            f"• 推荐人数：{stats['recommend']} 人（{recommend_percentage}%）\n"
+            f"• 不推荐：{stats['not_recommend']} 人（{not_rec_pct}%）\n"
         )
         if score_line:
-            display_text += f"\n⭐ 综合评分：{score_line}\n"
+            display_text += f"\n⭐ 综合印象\n{score_line}\n"
 
         if stats["latest"]:
-            display_text += f"\n━━━━━━━━━━━━━\n📝 最新评价（最多显示 {MAX_INLINE_REVIEWS} 条）：\n\n"
+            display_text += f"\n📝 最新反馈\n"
             for i, review in enumerate(stats["latest"][:MAX_INLINE_REVIEWS], 1):
                 rec_emoji = "👍" if review[2] else "👎"
                 reason = review[3]
-                display_text += f"{i}. {rec_emoji} [#{review[0]}]\n"
+                display_text += f"{i}. {rec_emoji} 评价 #{review[0]}\n"
                 display_text += f"   💬 {reason[:50]}{'...' if len(reason) > 50 else ''}\n\n"
-            display_text += "━━━━━━━━━━━━━"
+            display_text = display_text.rstrip()
 
-    action_row = [
-        InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher_name}"),
-        InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher_name}")
-    ]
-    kb_rows = [action_row]
+    kb_rows = [[
+        InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}"),
+        InlineKeyboardButton(text="🏆 教师榜单", callback_data="leaderboard_quick")
+    ]]
 
     if stats["total"] > MAX_INLINE_REVIEWS:
         remaining = stats["total"] - MAX_INLINE_REVIEWS
         kb_rows.append([
             InlineKeyboardButton(
-                text=f"📋 查看更多评价（{remaining} 条）",
+                text=f"📋 查看全部评价（还有 {remaining} 条）",
                 callback_data=f"more_reviews|{teacher_name}|0"
             )
         ])
@@ -581,7 +596,7 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     
     try:
         sent = await message.reply(
-            f"👋 您提到了 @{teacher_name}\n\n请选择您要进行的操作：",
+            f"👋 已识别教师 @{teacher_name}\n\n请选择接下来要执行的操作：",
             reply_markup=_build_mention_action_keyboard(teacher_name)
         )
         logger.info(f"✅ 已向用户询问 @{teacher_name} 的操作类型")
