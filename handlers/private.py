@@ -24,7 +24,7 @@ from database import (
     get_teacher_score_averages,
 )
 from states import RatingStates
-from bot_instance import bot, get_channel_invite_link
+from bot_instance import bot, get_channel_invite_link, get_bot_start_url
 from utils.helpers import (
     format_leaderboard_text,
     fetch_tg_teacher_info,
@@ -51,17 +51,70 @@ DEFAULT_WELCOME_MESSAGE = (
 
 
 def _build_welcome_keyboard(start_buttons: list):
-    """根据是否有自定义按钮决定键盘类型；无自定义按钮时不显示底部按钮"""
+    """根据是否有自定义按钮决定键盘类型；无自定义按钮时显示默认导航内联按钮"""
     if start_buttons:
         kb_rows = []
         for btn in start_buttons:
             kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
         return InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    return None
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📖 查看帮助", callback_data="show_help"),
+            InlineKeyboardButton(text="⭐ 如何评价", callback_data="how_to_rate"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 教师排行榜", callback_data="leaderboard_quick"),
+            InlineKeyboardButton(text="❓ 常见问题", callback_data="faq"),
+        ],
+    ])
 
 
-def _build_mention_action_keyboard(teacher_name: str) -> InlineKeyboardMarkup:
+def _extract_start_payload(text: str) -> str:
+    """从 /start 文本中提取 payload"""
+    if not text:
+        return ""
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip()
+
+
+async def _start_rating_flow(message: Message, state: FSMContext, teacher_name: str) -> None:
+    """在私聊中初始化评价流程"""
+    await state.update_data(
+        teacher=teacher_name,
+        user_id=message.from_user.id,
+        forward_checked=False,
+        forwarded_teacher_id="",
+        forwarded_teacher_username="",
+        forwarded_teacher_nickname=""
+    )
+    await state.set_state(RatingStates.waiting_forwarded_message)
+    await message.reply(
+        f"📝 正在为 @{teacher_name} 提交评价\n\n"
+        f"第 1 步：请先转发一条该教师的 Telegram 消息给我。\n"
+        f"我会尽量识别 TA 的 Telegram ID，然后再进入评分与评价流程。\n\n"
+        f"✅ 支持转发文字、图片、语音等消息\n"
+        f"⚠️ 请直接使用 Telegram 的“转发”功能，不要复制粘贴内容"
+    )
+
+
+async def _build_mention_action_keyboard(teacher_name: str, is_private: bool) -> InlineKeyboardMarkup:
     """构建 @提及时的操作选择按钮"""
+    if is_private:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📖 查看评价", callback_data=f"mention_action|view|{teacher_name}")],
+            [InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")]
+        ])
+
+    view_url = await get_bot_start_url(f"view_{teacher_name}")
+    rate_url = await get_bot_start_url(f"rate_{teacher_name}")
+    if view_url and rate_url:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📖 查看评价", url=view_url)],
+            [InlineKeyboardButton(text="📝 提交评价", url=rate_url)]
+        ])
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📖 查看评价", callback_data=f"mention_action|view|{teacher_name}")],
         [InlineKeyboardButton(text="📝 提交评价", callback_data=f"mention_action|rate|{teacher_name}")]
@@ -69,7 +122,7 @@ def _build_mention_action_keyboard(teacher_name: str) -> InlineKeyboardMarkup:
 
 
 @router.message(Command("start", "开始"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
     """处理 /start 或 /开始 命令"""
     if message.chat.type != "private":
         return
@@ -163,7 +216,21 @@ async def cmd_start(message: Message):
     welcome = get_start_message(DEFAULT_WELCOME_MESSAGE)
     start_buttons = get_start_buttons()
     kb = _build_welcome_keyboard(start_buttons)
-    
+    payload = _extract_start_payload(message.text or "")
+
+    if payload.startswith("view_"):
+        teacher_name = payload[5:].strip().lstrip("@")
+        if teacher_name:
+            card_text, card_kb = await _build_teacher_card(teacher_name)
+            await message.reply(card_text, reply_markup=card_kb)
+            return
+
+    if payload.startswith("rate_"):
+        teacher_name = payload[5:].strip().lstrip("@")
+        if teacher_name:
+            await _start_rating_flow(message, state, teacher_name)
+            return
+
     await message.reply(welcome, reply_markup=kb)
 
 
@@ -174,6 +241,12 @@ async def kb_show_help(message: Message):
     """处理键盘按钮：查看帮助"""
     if message.chat.type != "private":
         return
+    await cmd_help(message)
+
+
+@router.message(F.text.regexp(r"^/帮助(?:@[A-Za-z0-9_]+)?$"), StateFilter(None))
+async def text_cmd_help(message: Message):
+    """兼容 /帮助 被当作普通文本发送的情况"""
     await cmd_help(message)
 
 
@@ -587,7 +660,10 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     try:
         sent = await message.reply(
             f"👋 已识别教师 @{teacher_name}\n\n请选择接下来要执行的操作：",
-            reply_markup=_build_mention_action_keyboard(teacher_name)
+            reply_markup=await _build_mention_action_keyboard(
+                teacher_name,
+                is_private=message.chat.type == "private"
+            )
         )
         logger.info(f"✅ 已向用户询问 @{teacher_name} 的操作类型")
 
