@@ -85,8 +85,43 @@ def build_score_keyboard(step_callback_prefix: str, teacher: str) -> InlineKeybo
         ],
         [
             InlineKeyboardButton(text="⏭️ 跳过本项", callback_data=f"{step_callback_prefix}|skip|{teacher}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 返回", callback_data=f"rating_back|{step_callback_prefix}|{teacher}"),
+            InlineKeyboardButton(text="❌ 取消", callback_data=f"rating_cancel|{teacher}")
         ]
     ])
+
+
+def build_rating_nav_keyboard(teacher: str, back_target: str = None, back_text: str = "🔙 返回") -> InlineKeyboardMarkup:
+    """构建评价流程中的返回/取消导航按钮"""
+    row = []
+    if back_target:
+        row.append(InlineKeyboardButton(text=back_text, callback_data=f"rating_back|{back_target}|{teacher}"))
+    row.append(InlineKeyboardButton(text="❌ 取消", callback_data=f"rating_cancel|{teacher}"))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+def build_rating_attitude_keyboard(teacher: str) -> InlineKeyboardMarkup:
+    """构建选择推荐态度的键盘"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher}"),
+            InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher}")
+        ],
+        build_rating_nav_keyboard(teacher, back_target="forward").inline_keyboard[0]
+    ])
+
+
+def get_rating_forward_prompt(teacher: str) -> str:
+    """构建评价流程首步提示语"""
+    return (
+        f"📝 正在为 @{teacher} 提交评价\n\n"
+        f"第 1 步：请先转发一条该教师的 Telegram 消息给我。\n"
+        f"我会尽量识别 TA 的 Telegram ID，然后再进入评分与评价流程。\n\n"
+        f"✅ 支持转发文字、图片、语音等消息\n"
+        f"⚠️ 请直接使用 Telegram 的“转发”功能，不要复制粘贴内容"
+    )
 
 
 def format_score_line(scores: dict) -> str:

@@ -43,14 +43,34 @@ from bot_instance import bot, get_channel_invite_link
 from utils.helpers import (
     SCORE_DIMENSIONS,
     build_score_keyboard,
+    build_rating_attitude_keyboard,
+    build_rating_nav_keyboard,
     format_leaderboard_text,
     fetch_tg_teacher_info,
+    get_rating_forward_prompt,
 )
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 REVIEWS_PER_PAGE = 5  # 「更多评价」每页显示的评价条数
+
+
+def _build_rating_reason_prompt(teaching_score, grading_score, difficulty_score) -> str:
+    """构建填写评价理由前的提示语"""
+    return (
+        f"✅ 评分完成！\n\n"
+        f"{SCORE_DIMENSIONS['teaching']['icon']} {SCORE_DIMENSIONS['teaching']['title']}："
+        f"{f'{teaching_score} 分' if teaching_score is not None else '已跳过'}\n"
+        f"{SCORE_DIMENSIONS['grading']['icon']} {SCORE_DIMENSIONS['grading']['title']}："
+        f"{f'{grading_score} 分' if grading_score is not None else '已跳过'}\n"
+        f"{SCORE_DIMENSIONS['difficulty']['icon']} {SCORE_DIMENSIONS['difficulty']['title']}："
+        f"{f'{difficulty_score} 分' if difficulty_score is not None else '已跳过'}\n\n"
+        f"现在请在私聊中填写您的评价理由（至少 12 字）：\n\n"
+        f"💡 评价示例：\n"
+        f"\"讲课很生动，逻辑清晰，认真负责，强烈推荐\"\n"
+        f"\"教学速度较快，不太照顾基础差的同学\""
+    )
 
 
 def _is_admin(user_id: int) -> bool:
@@ -125,25 +145,23 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
                 await private_state.set_state(RatingStates.waiting_forwarded_message)
 
                 await callback.answer()
-                prompt_text = (
-                    f"📝 正在为 @{teacher} 提交评价\n\n"
-                    f"第 1 步：请先转发一条该教师的 Telegram 消息给我。\n"
-                    f"我会尽量识别 TA 的 Telegram ID，然后再进入评分与评价流程。"
-                )
-                delivery_text = (
-                    prompt_text + "\n\n"
-                    "✅ 支持转发文字、图片、语音等消息\n"
-                    "⚠️ 请直接使用 Telegram 的“转发”功能，不要复制粘贴内容"
-                )
+                delivery_text = get_rating_forward_prompt(teacher)
                 try:
                     if callback.message.chat.type == "private":
-                        await callback.message.edit_text(delivery_text)
+                        await callback.message.edit_text(
+                            delivery_text,
+                            reply_markup=build_rating_nav_keyboard(teacher, back_target="card")
+                        )
                     else:
                         await callback.message.edit_text(
                             f"📝 已开始 @{teacher} 的评价流程\n\n"
                             f"我已经把后续步骤发到私聊，请到私聊中继续转发教师消息。"
                         )
-                        await bot.send_message(callback.from_user.id, delivery_text)
+                        await bot.send_message(
+                            callback.from_user.id,
+                            delivery_text,
+                            reply_markup=build_rating_nav_keyboard(teacher, back_target="card")
+                        )
                 except Exception as e:
                     logger.error(f"发送评价流程私聊失败: {e}")
                     await callback.message.reply("❌ 无法给您发送私聊，请先私聊机器人并发送 /start 后再试。")
@@ -229,6 +247,144 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
                 await callback.answer("❌ 无法继续发送评分步骤，请稍后重试", show_alert=True)
             return
 
+        if data.startswith("rating_cancel|"):
+            teacher = data.split("|", 1)[1] if "|" in data else ""
+            user_id = callback.from_user.id
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(bot_id=callback.bot.id, chat_id=user_id, user_id=user_id)
+            )
+            await private_state.clear()
+            await callback.answer("已取消评价")
+            await callback.message.edit_text(
+                f"🛑 已取消对 @{teacher} 的评价提交。" if teacher else "🛑 已取消当前评价流程。"
+            )
+            return
+
+        if data.startswith("rating_back|"):
+            parts = data.split("|", 2)
+            if len(parts) < 3:
+                await callback.answer("❌ 数据错误", show_alert=True)
+                return
+
+            back_target = parts[1]
+            teacher = parts[2]
+            user_id = callback.from_user.id
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(bot_id=callback.bot.id, chat_id=user_id, user_id=user_id)
+            )
+            state_data = await private_state.get_data()
+
+            if back_target == "card":
+                from handlers.private import _build_teacher_card
+
+                await private_state.clear()
+                text, kb = await _build_teacher_card(teacher)
+                await callback.answer()
+                await callback.message.edit_text(text, reply_markup=kb)
+                return
+
+            if back_target == "forward":
+                await private_state.update_data(
+                    forward_checked=False,
+                    forwarded_teacher_id="",
+                    forwarded_teacher_username="",
+                    forwarded_teacher_nickname="",
+                    recommend=None,
+                    score_teaching=None,
+                    score_grading=None,
+                    score_difficulty=None,
+                )
+                await private_state.set_state(RatingStates.waiting_forwarded_message)
+                await callback.answer()
+                await callback.message.edit_text(
+                    get_rating_forward_prompt(teacher),
+                    reply_markup=build_rating_nav_keyboard(teacher, back_target="card")
+                )
+                return
+
+            if back_target == "score_teaching":
+                identified_parts = []
+                if state_data.get("forwarded_teacher_username"):
+                    identified_parts.append(f"@{state_data['forwarded_teacher_username']}")
+                if state_data.get("forwarded_teacher_nickname"):
+                    identified_parts.append(state_data["forwarded_teacher_nickname"])
+                if state_data.get("forwarded_teacher_id"):
+                    identified_parts.append(f"ID：{state_data['forwarded_teacher_id']}")
+                identify_text = (
+                    "✅ 已收到转发消息\n"
+                    f"已识别：{' / '.join(identified_parts)}\n\n"
+                    if identified_parts else
+                    "✅ 已收到转发消息\n"
+                    "⚠️ 由于转发来源或隐私设置限制，暂时无法读取教师 ID，但可以继续评价。\n\n"
+                )
+                await private_state.update_data(
+                    recommend=None,
+                    score_teaching=None,
+                    score_grading=None,
+                    score_difficulty=None,
+                )
+                await private_state.set_state(RatingStates.waiting_forwarded_message)
+                await callback.answer()
+                await callback.message.edit_text(
+                    identify_text + f"第 2 步：请为 @{teacher} 选择您的态度：",
+                    reply_markup=build_rating_attitude_keyboard(teacher)
+                )
+                return
+
+            if back_target == "score_grading":
+                recommend = state_data.get("recommend")
+                score_meta = SCORE_DIMENSIONS["teaching"]
+                await private_state.update_data(
+                    score_teaching=None,
+                    score_grading=None,
+                    score_difficulty=None,
+                )
+                await private_state.set_state(RatingStates.waiting_score_teaching)
+                await callback.answer()
+                await callback.message.edit_text(
+                    f"📝 您选择了 {'👍 推荐' if recommend else '👎 不推荐'} @{teacher}\n\n"
+                    f"请为该教师的各项维度打分（1-5 分）：\n\n"
+                    f"{score_meta['icon']} 第 1/3 步：{score_meta['title']}（{score_meta['description']}）",
+                    reply_markup=build_score_keyboard("score_teaching", teacher)
+                )
+                return
+
+            if back_target == "score_difficulty":
+                teaching_score = state_data.get("score_teaching")
+                score_meta = SCORE_DIMENSIONS["grading"]
+                await private_state.update_data(
+                    score_grading=None,
+                    score_difficulty=None,
+                )
+                await private_state.set_state(RatingStates.waiting_score_grading)
+                await callback.answer()
+                await callback.message.edit_text(
+                    f"{SCORE_DIMENSIONS['teaching']['icon']} {SCORE_DIMENSIONS['teaching']['title']}："
+                    f"{f'{teaching_score} 分' if teaching_score is not None else '已跳过'}\n\n"
+                    f"{score_meta['icon']} 第 2/3 步：{score_meta['title']}（{score_meta['description']}）",
+                    reply_markup=build_score_keyboard("score_grading", teacher)
+                )
+                return
+
+            if back_target == "reason":
+                grading_score = state_data.get("score_grading")
+                await private_state.update_data(score_difficulty=None)
+                await private_state.set_state(RatingStates.waiting_score_difficulty)
+                await callback.answer()
+                await callback.message.edit_text(
+                    f"{SCORE_DIMENSIONS['grading']['icon']} {SCORE_DIMENSIONS['grading']['title']}："
+                    f"{f'{grading_score} 分' if grading_score is not None else '已跳过'}\n\n"
+                    f"{SCORE_DIMENSIONS['difficulty']['icon']} 第 3/3 步："
+                    f"{SCORE_DIMENSIONS['difficulty']['title']}（{SCORE_DIMENSIONS['difficulty']['description']}）",
+                    reply_markup=build_score_keyboard("score_difficulty", teacher)
+                )
+                return
+
+            await callback.answer("❌ 暂不支持返回该步骤", show_alert=True)
+            return
+
         # ==================== 多维度评分回调 ====================
 
         if data.startswith("score_teaching|"):
@@ -302,17 +458,9 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
             g_score = state_data.get("score_grading")
             d_score = score_val
 
-            summary = (
-                f"{SCORE_DIMENSIONS['teaching']['icon']} {SCORE_DIMENSIONS['teaching']['title']}：{f'{t_score} 分' if t_score is not None else '已跳过'}\n"
-                f"{SCORE_DIMENSIONS['grading']['icon']} {SCORE_DIMENSIONS['grading']['title']}：{f'{g_score} 分' if g_score is not None else '已跳过'}\n"
-                f"{SCORE_DIMENSIONS['difficulty']['icon']} {SCORE_DIMENSIONS['difficulty']['title']}：{score_label}\n"
-            )
             await callback.message.edit_text(
-                f"✅ 评分完成！\n\n{summary}\n"
-                f"现在请在私聊中填写您的评价理由（至少 12 字）：\n\n"
-                f"💡 评价示例：\n"
-                f"\"讲课很生动，逻辑清晰，认真负责，强烈推荐\"\n"
-                f"\"教学速度较快，不太照顾基础差的同学\""
+                _build_rating_reason_prompt(t_score, g_score, d_score),
+                reply_markup=build_rating_nav_keyboard(teacher, back_target="reason")
             )
             return
 
