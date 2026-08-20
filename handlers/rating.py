@@ -23,6 +23,7 @@ from utils.helpers import (
     SCORE_DIMENSIONS,
     extract_forwarded_teacher_info,
     build_rating_attitude_keyboard,
+    build_rating_nav_keyboard,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,8 @@ async def process_forwarded_teacher_message(message: Message, state: FSMContext)
         getattr(message, "forward_sender_name", None),
     ]):
         await message.reply(
-            "⚠️ 这不是一条转发消息，请直接使用 Telegram 的“转发”功能发送教师消息给我。"
+            "⚠️ 这不是一条转发消息，请直接使用 Telegram 的"转发"功能发送教师消息给我。",
+            reply_markup=build_rating_nav_keyboard(teacher, back_target="card")
         )
         return
 
