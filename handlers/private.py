@@ -9,7 +9,13 @@ import logging
 import re
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
 from aiogram.fsm.context import FSMContext
 from database import (
     get_start_message,
@@ -51,13 +57,19 @@ DEFAULT_WELCOME_MESSAGE = (
 
 
 def _build_welcome_keyboard(start_buttons: list):
-    """根据是否有自定义按钮决定键盘类型；无自定义按钮时不显示底部按钮"""
+    """根据是否有自定义按钮决定键盘类型；无自定义按钮时显示默认导航键盘"""
     if start_buttons:
         kb_rows = []
         for btn in start_buttons:
             kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
         return InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    return None
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📖 查看帮助"), KeyboardButton(text="⭐ 如何评价")],
+            [KeyboardButton(text="🏆 教师排行榜"), KeyboardButton(text="❓ 常见问题")],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def _extract_start_payload(text: str) -> str:
