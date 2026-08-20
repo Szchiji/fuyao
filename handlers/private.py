@@ -57,16 +57,7 @@ def _build_welcome_keyboard(start_buttons: list):
         for btn in start_buttons:
             kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
         return InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📖 查看帮助", callback_data="show_help"),
-            InlineKeyboardButton(text="⭐ 如何评价", callback_data="how_to_rate"),
-        ],
-        [
-            InlineKeyboardButton(text="🏆 教师排行榜", callback_data="leaderboard_quick"),
-            InlineKeyboardButton(text="❓ 常见问题", callback_data="faq"),
-        ],
-    ])
+    return None
 
 
 def _extract_start_payload(text: str) -> str:
@@ -337,7 +328,6 @@ async def cmd_help(message: Message):
 
 👥 用户命令：
 • /开始 - 启动机器人
-• /帮助 - 获取帮助
 • /查询 <教师名> - 搜索教师评价（支持中文名模糊搜索）
 • /我的ID - 获取您的用户ID
 
@@ -420,7 +410,6 @@ Q: 如何举报不文明的评价？
 A: 联系管理员，提供评价的教师名称和时间。
 
 📞 获取帮助：
-• 查看这个帮助文档: /帮助
 • 联系管理员获取更多帮助
 • 在群组中使用 @teacher_name 测试
 • 私聊中使用 /查询 李老师 测试"""
