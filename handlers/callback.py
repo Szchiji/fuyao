@@ -576,10 +576,12 @@ A: 可以用别账号""", reply_markup=kb)
 
         if data == "leaderboard_worst":
             await callback.answer()
-            leaderboard = get_leaderboard(10)
-            # sort by not_recommend desc, then total desc
-            worst = sorted(leaderboard, key=lambda x: (x["not_recommend"], x["total"]), reverse=True)[:10]
-            text = format_leaderboard_text(worst, title="💀 差评排行榜")
+            worst = get_leaderboard(10, order_by="not_recommend")
+            text = format_leaderboard_text(
+                worst,
+                title="💀 差评排行榜",
+                metric="not_recommend",
+            )
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="🏆 推荐榜", callback_data="leaderboard_quick"),

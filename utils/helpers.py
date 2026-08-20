@@ -223,7 +223,11 @@ def _pct_bar(pct: int, width: int = 8) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def format_leaderboard_text(leaderboard: list, title: str = "🏆 教师推荐排行榜") -> str:
+def format_leaderboard_text(
+    leaderboard: list,
+    title: str = "🏆 教师推荐排行榜",
+    metric: str = "recommend",
+) -> str:
     """将排行榜数据格式化为消息文本（升级版 UI）"""
     if not leaderboard:
         return (
@@ -232,6 +236,9 @@ def format_leaderboard_text(leaderboard: list, title: str = "🏆 教师推荐�
         )
 
     from database import get_teacher_info
+
+    pct_key = "not_recommend_pct" if metric == "not_recommend" else "recommend_pct"
+    pct_label = "差评率" if metric == "not_recommend" else "推荐率"
 
     medals = ["🥇", "🥈", "🥉"]
     rank_icons = ["4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
@@ -243,7 +250,7 @@ def format_leaderboard_text(leaderboard: list, title: str = "🏆 教师推荐�
         recommend = entry["recommend"]
         not_recommend = entry["not_recommend"]
         total = entry["total"]
-        pct = entry["recommend_pct"]
+        pct = entry.get(pct_key, 0)
 
         # rank prefix
         if i <= 3:
@@ -272,7 +279,7 @@ def format_leaderboard_text(leaderboard: list, title: str = "🏆 教师推荐�
             heat = ""
 
         lines.append(f"{prefix} {display_name} {heat}")
-        lines.append(f"   [{bar}] {pct}%  👍{recommend} 👎{not_recommend}  共{total}评")
+        lines.append(f"   [{bar}] {pct_label} {pct}%  👍{recommend} 👎{not_recommend}  共{total}评")
         lines.append("")
 
     lines.append("─" * 20)
