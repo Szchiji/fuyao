@@ -703,7 +703,10 @@ A: 可以用别账号""", reply_markup=kb)
             welcome = get_start_message(DEFAULT_WELCOME_MESSAGE)
             start_buttons = get_start_buttons()
             kb = _build_welcome_keyboard(start_buttons)
-            await callback.message.edit_text(welcome, reply_markup=kb)
+            if isinstance(kb, InlineKeyboardMarkup):
+                await callback.message.edit_text(welcome, reply_markup=kb)
+            else:
+                await callback.message.edit_text(welcome)
             return
 
         if data == "check_all_subscriptions":
