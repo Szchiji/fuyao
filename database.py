@@ -915,17 +915,21 @@ def get_teacher_all_ratings(teacher: str) -> list:
         return []
 
 
-def get_leaderboard(limit: int = 10) -> list:
+def get_leaderboard(limit: int = 10, order_by: str = "recommend") -> list:
     """
-    获取教师排行榜（按推荐数降序，推荐数相同则按总评价数降序）
+    获取教师排行榜
 
     Args:
         limit: 返回的教师数量，默认 10
+        order_by: 排序字段，支持 recommend / not_recommend
 
     Returns:
-        列表，每项为 dict: teacher, total, recommend, not_recommend, recommend_pct
+        列表，每项为 dict: teacher, total, recommend, not_recommend, recommend_pct, not_recommend_pct
     """
     try:
+        if order_by not in {"recommend", "not_recommend"}:
+            order_by = "recommend"
+
         rows = _db.query_all(
             """SELECT teacher,
                       COUNT(*) AS total,
@@ -967,9 +971,10 @@ def get_leaderboard(limit: int = 10) -> list:
                 "recommend": entry["recommend"],
                 "not_recommend": entry["not_recommend"],
                 "recommend_pct": int(entry["recommend"] / total * 100) if total > 0 else 0,
+                "not_recommend_pct": int(entry["not_recommend"] / total * 100) if total > 0 else 0,
             })
 
-        result.sort(key=lambda item: (item["recommend"], item["total"]), reverse=True)
+        result.sort(key=lambda item: (item[order_by], item["total"]), reverse=True)
         return result[:limit]
     except Exception as e:
         logger.error(f"获取排行榜失败: {e}")
