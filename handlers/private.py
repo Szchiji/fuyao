@@ -292,7 +292,13 @@ async def kb_leaderboard(message: Message):
         return
     leaderboard = get_leaderboard(10)
     text = format_leaderboard_text(leaderboard)
-    await message.reply(text)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 刷新", callback_data="leaderboard_quick"),
+            InlineKeyboardButton(text="👎 差评榜", callback_data="leaderboard_worst"),
+        ]
+    ])
+    await message.reply(text, reply_markup=kb)
 
 
 @router.message(F.text == "❓ 常见问题", StateFilter(None))
