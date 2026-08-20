@@ -30,6 +30,8 @@ from utils.helpers import (
     fetch_tg_teacher_info,
     auto_delete_message,
     format_score_line,
+    build_rating_nav_keyboard,
+    get_rating_forward_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,11 +84,8 @@ async def _start_rating_flow(message: Message, state: FSMContext, teacher_name: 
     )
     await state.set_state(RatingStates.waiting_forwarded_message)
     await message.reply(
-        f"📝 正在为 @{teacher_name} 提交评价\n\n"
-        f"第 1 步：请先转发一条该教师的 Telegram 消息给我。\n"
-        f"我会尽量识别 TA 的 Telegram ID，然后再进入评分与评价流程。\n\n"
-        f"✅ 支持转发文字、图片、语音等消息\n"
-        f"⚠️ 请直接使用 Telegram 的“转发”功能，不要复制粘贴内容"
+        get_rating_forward_prompt(teacher_name),
+        reply_markup=build_rating_nav_keyboard(teacher_name, back_target="card")
     )
 
 

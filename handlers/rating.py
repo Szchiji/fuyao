@@ -7,7 +7,7 @@
 import logging
 from aiogram import Router
 from aiogram.filters import StateFilter
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from states import RatingStates
 from database import (
@@ -19,7 +19,11 @@ from database import (
     set_teacher_info,
 )
 from bot_instance import bot
-from utils.helpers import SCORE_DIMENSIONS, extract_forwarded_teacher_info
+from utils.helpers import (
+    SCORE_DIMENSIONS,
+    extract_forwarded_teacher_info,
+    build_rating_attitude_keyboard,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -95,12 +99,7 @@ async def process_forwarded_teacher_message(message: Message, state: FSMContext)
         forwarded_teacher_nickname=nickname,
     )
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👍 推荐", callback_data=f"rec|1|{teacher}"),
-            InlineKeyboardButton(text="👎 不推荐", callback_data=f"rec|0|{teacher}")
-        ]
-    ])
+    kb = build_rating_attitude_keyboard(teacher)
 
     identified_parts = []
     if teacher_username:
@@ -222,11 +221,11 @@ async def process_rating_reason(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="📤 点击分享此卡片", switch_inline_query=teacher)]
         ])
 
-        await message.reply(success_msg)
+        await message.reply(success_msg, reply_markup=ReplyKeyboardRemove())
         await message.answer(share_card, reply_markup=share_kb)
         logger.info(f"✅ 用户 {user_id} 成功评价了 @{teacher}")
     else:
-        await message.reply(result["msg"])
+        await message.reply(result["msg"], reply_markup=ReplyKeyboardRemove())
         logger.error(f"❌ 评价提交失败: {result['msg']}")
     
     await state.clear()
