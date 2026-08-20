@@ -21,6 +21,7 @@ bot = Bot(
 # 存储频道邀请链接的缓存（LRU，最多缓存 256 个条目，避免无限增长）
 _channel_invite_cache: OrderedDict = OrderedDict()
 _CACHE_MAX_SIZE = 256
+_bot_username: str = ""
 
 
 def _cache_put(key: str, value: str) -> None:
@@ -75,3 +76,28 @@ async def get_channel_invite_link(channel_id: str) -> str:
     except Exception as e:
         logger.error(f"❌ 获取频道邀请链接失败: {e}")
         return ""
+
+
+async def get_bot_username() -> str:
+    """获取机器人用户名，并尽量复用缓存"""
+    global _bot_username
+    if _bot_username:
+        return _bot_username
+
+    try:
+        me = await bot.get_me()
+        _bot_username = me.username or ""
+        return _bot_username
+    except Exception as e:
+        logger.error(f"❌ 获取机器人用户名失败: {e}")
+        return ""
+
+
+async def get_bot_start_url(payload: str = "") -> str:
+    """生成机器人私聊 deep link"""
+    username = await get_bot_username()
+    if not username:
+        return ""
+    if payload:
+        return f"https://t.me/{username}?start={payload}"
+    return f"https://t.me/{username}"
