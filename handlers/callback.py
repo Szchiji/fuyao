@@ -338,7 +338,7 @@ async def handle_callback(callback: CallbackQuery, state: FSMContext):
 "讲课很生动，逻辑清晰，认真负责，强烈推荐"
 
 💡 更多帮助:
-/帮助""",
+联系管理员""",
                 reply_markup=kb
             )
             return
@@ -551,7 +551,11 @@ A: 可以用别账号""", reply_markup=kb)
 
         if data == "back_to_start":
             await callback.answer()
-            await _send_welcome(callback.message)
+            from handlers.private import _build_welcome_keyboard, DEFAULT_WELCOME_MESSAGE
+            welcome = get_start_message(DEFAULT_WELCOME_MESSAGE)
+            start_buttons = get_start_buttons()
+            kb = _build_welcome_keyboard(start_buttons)
+            await callback.message.edit_text(welcome, reply_markup=kb)
             return
 
         if data == "check_all_subscriptions":
