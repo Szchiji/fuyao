@@ -9,7 +9,7 @@ import logging
 import re
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from database import (
     get_start_message,
@@ -53,13 +53,17 @@ DEFAULT_WELCOME_MESSAGE = (
 
 
 def _build_welcome_keyboard(start_buttons: list):
-    """根据是否有自定义按钮决定键盘类型；无自定义按钮时移除底部键盘"""
-    if start_buttons:
-        kb_rows = []
-        for btn in start_buttons:
-            kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
-        return InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    return ReplyKeyboardRemove()
+    """构建欢迎页键盘，固定包含三个快捷按钮，并追加自定义按钮"""
+    kb_rows = [
+        [
+            InlineKeyboardButton(text="🚀 快速上手", callback_data="show_help"),
+            InlineKeyboardButton(text="📝 评价流程", callback_data="how_to_rate"),
+            InlineKeyboardButton(text="🏆 排行榜", callback_data="leaderboard_quick"),
+        ]
+    ]
+    for btn in start_buttons:
+        kb_rows.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
+    return InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
 
 def _extract_start_payload(text: str) -> str:
