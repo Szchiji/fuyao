@@ -217,18 +217,65 @@ async def send_teacher_detail(message: Message, teacher: str, edit_msg_id=None):
         await message.reply(f"发送失败: {str(e)}")
 
 
-def format_leaderboard_text(leaderboard: list) -> str:
-    """将排行榜数据格式化为消息文本"""
+def _pct_bar(pct: int, width: int = 8) -> str:
+    """生成一条 Unicode 进度条，表示推荐率百分比"""
+    filled = round(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def format_leaderboard_text(leaderboard: list, title: str = "🏆 教师推荐排行榜") -> str:
+    """将排行榜数据格式化为消息文本（升级版 UI）"""
     if not leaderboard:
-        return "📊 暂无排行榜数据\n\n快去评价教师吧！"
+        return (
+            "📊 暂无排行榜数据\n\n"
+            "快去评价教师，帮助更多同学做出选择吧！"
+        )
+
+    from database import get_teacher_info
 
     medals = ["🥇", "🥈", "🥉"]
-    text = "🏆 教师推荐排行榜 TOP 10\n\n"
+    rank_icons = ["4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+    lines = [f"{title}  TOP {len(leaderboard)}", ""]
+
     for i, entry in enumerate(leaderboard, 1):
-        prefix = medals[i - 1] if i <= 3 else f"{i}."
-        text += (
-            f"{prefix} @{entry['teacher']}\n"
-            f"   👍 {entry['recommend']} | 👎 {entry['not_recommend']} | "
-            f"总 {entry['total']} | 推荐率 {entry['recommend_pct']}%\n\n"
-        )
-    return text
+        teacher = entry["teacher"]
+        recommend = entry["recommend"]
+        not_recommend = entry["not_recommend"]
+        total = entry["total"]
+        pct = entry["recommend_pct"]
+
+        # rank prefix
+        if i <= 3:
+            prefix = medals[i - 1]
+        elif i <= 10:
+            prefix = rank_icons[i - 4]
+        else:
+            prefix = f"{i}."
+
+        # nickname
+        info = get_teacher_info(teacher)
+        nickname = info.get("nickname", "")
+        display_name = f"@{teacher}"
+        if nickname:
+            display_name = f"{nickname}（@{teacher}）"
+
+        # recommend bar
+        bar = _pct_bar(pct)
+
+        # heat indicator
+        if total >= 20:
+            heat = "🔥"
+        elif total >= 10:
+            heat = "⚡"
+        else:
+            heat = ""
+
+        lines.append(f"{prefix} {display_name} {heat}")
+        lines.append(f"   [{bar}] {pct}%  👍{recommend} 👎{not_recommend}  共{total}评")
+        lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("💡 发送 @用户名 可查看完整评价")
+
+    return "\n".join(lines)

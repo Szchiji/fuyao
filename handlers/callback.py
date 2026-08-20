@@ -565,7 +565,27 @@ A: 可以用别账号""", reply_markup=kb)
             leaderboard = get_leaderboard(10)
             text = format_leaderboard_text(leaderboard)
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+                [
+                    InlineKeyboardButton(text="🔄 刷新", callback_data="leaderboard_quick"),
+                    InlineKeyboardButton(text="👎 差评榜", callback_data="leaderboard_worst"),
+                ],
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")],
+            ])
+            await callback.message.edit_text(text, reply_markup=kb)
+            return
+
+        if data == "leaderboard_worst":
+            await callback.answer()
+            leaderboard = get_leaderboard(10)
+            # sort by not_recommend desc, then total desc
+            worst = sorted(leaderboard, key=lambda x: (x["not_recommend"], x["total"]), reverse=True)[:10]
+            text = format_leaderboard_text(worst, title="💀 差评排行榜")
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🏆 推荐榜", callback_data="leaderboard_quick"),
+                    InlineKeyboardButton(text="🔄 刷新", callback_data="leaderboard_worst"),
+                ],
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")],
             ])
             await callback.message.edit_text(text, reply_markup=kb)
             return
@@ -636,7 +656,11 @@ A: 可以用别账号""", reply_markup=kb)
             await callback.answer()
 
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")]
+                [
+                    InlineKeyboardButton(text="🔄 刷新", callback_data="show_leaderboard"),
+                    InlineKeyboardButton(text="👎 差评榜", callback_data="leaderboard_worst"),
+                ],
+                [InlineKeyboardButton(text="🔙 返回主菜单", callback_data="back_to_start")],
             ])
             await callback.message.edit_text(text, reply_markup=kb)
             return
