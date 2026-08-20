@@ -10,7 +10,7 @@ import os
 import time
 from aiohttp import web
 from aiogram import Bot, Dispatcher
-from aiogram.types import Update
+from aiogram.types import Update, MenuButtonDefault
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
@@ -186,6 +186,14 @@ async def main():
         default=DefaultBotProperties(parse_mode="HTML")
     )
     
+    # 取消私聊底部菜单键盘按钮
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+        await bot.delete_my_commands()
+        logger.info("✅ 已隐藏私聊底部菜单键盘按钮")
+    except Exception as e:
+        logger.warning(f"⚠️ 隐藏菜单按钮失败: {e}")
+
     # 设置 Dispatcher
     await setup_dispatcher()
     
