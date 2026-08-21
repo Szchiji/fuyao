@@ -657,7 +657,7 @@ async def handle_teacher_mention(message: Message, state: FSMContext):
     
     try:
         sent = await message.reply(
-            f"👋 已识别教师 @{teacher_name}\n\n请选择接下来要执行的操作：",
+            f"👋 已识别用户 @{teacher_name}\n\n请选择接下来要执行的操作：",
             reply_markup=await _build_mention_action_keyboard(
                 teacher_name,
                 is_private=message.chat.type == "private"
